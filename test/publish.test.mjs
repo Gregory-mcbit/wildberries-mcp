@@ -33,6 +33,7 @@ const TOKEN = 'ghp_SUPERSECRET_TOKEN_1234567890';
 function makeMock({ repoExists = false, parentSha = null, authStatus = 200 } = {}) {
   const calls = [];
   const blobs = new Map();
+  const state = { seeded: false };
   let blobIndex = 0;
   const json = (status, data) => ({
     status,
@@ -61,8 +62,15 @@ function makeMock({ repoExists = false, parentSha = null, authStatus = 200 } = {
     }
     if (method === 'POST' && url.endsWith('/user/repos')) return json(201, { full_name: 'tester/wb-mcp' });
     if (method === 'GET' && /\/git\/ref\/heads\/main$/.test(url)) {
-      return parentSha ? json(200, { object: { sha: parentSha } }) : json(404, { message: 'Not Found' });
+      if (parentSha) return json(200, { object: { sha: parentSha } });
+      if (state.seeded) return json(200, { object: { sha: 'seed-sha' } });
+      return json(404, { message: 'Not Found' });
     }
+    if (method === 'PUT' && /\/contents\/\.gitignore$/.test(url)) {
+      state.seeded = true;
+      return json(201, { content: { sha: 'seed-blob' }, commit: { sha: 'seed-sha' } });
+    }
+    if (method === 'GET' && /\/git\/commits\/seed-sha$/.test(url)) return json(200, { tree: { sha: 'seed-tree' } });
     if (method === 'GET' && /\/git\/commits\/parent-sha$/.test(url)) return json(200, { tree: { sha: 'parent-tree' } });
     if (method === 'POST' && /\/git\/blobs$/.test(url)) {
       const sha = `blob-${blobIndex++}`;
@@ -180,10 +188,13 @@ async function main() {
       assert.ok(readmeBlob.includes('https://github.com/tester/wb-mcp'), 'подставлен реальный URL');
       assert.ok(!readmeBlob.includes('<owner>'), 'плейсхолдеры <owner> заменены');
       const commit = mock.calls.find((c) => c.method === 'POST' && /\/git\/commits$/.test(c.url));
-      assert.deepEqual(commit.body.parents, [], 'первый коммит без родителей');
-      const ref = mock.calls.find((c) => c.method === 'POST' && /\/git\/refs$/.test(c.url));
-      assert.equal(ref.body.ref, 'refs/heads/main');
-      assert.equal(ref.body.sha, 'commit-1');
+      assert.deepEqual(commit.body.parents, ['seed-sha'], 'коммит поверх bootstrap-коммита');
+      const boot = mock.calls.find((c) => c.method === 'PUT' && /\/contents\/\.gitignore$/.test(c.url));
+      assert.ok(boot, 'пустой репозиторий засеян начальным коммитом');
+      assert.equal(boot.body.author.email, 'wb-mcp@users.noreply.github.com', 'bootstrap-коммит без личных данных');
+      const patch = mock.calls.find((c) => c.method === 'PATCH' && /\/git\/refs\/heads\/main$/.test(c.url));
+      assert.ok(patch, 'ветка обновлена на итоговый коммит');
+      assert.equal(patch.body.sha, 'commit-1');
       const authHeader = mock.calls[0].headers.authorization;
       assert.ok(authHeader.includes(TOKEN), 'токен уходит только в заголовке');
       // локальные доки переписаны
