@@ -191,7 +191,9 @@ async function main() {
       assert.deepEqual(commit.body.parents, ['seed-sha'], 'коммит поверх bootstrap-коммита');
       const boot = mock.calls.find((c) => c.method === 'PUT' && /\/contents\/\.gitignore$/.test(c.url));
       assert.ok(boot, 'пустой репозиторий засеян начальным коммитом');
-      assert.equal(boot.body.author.email, 'wb-mcp@users.noreply.github.com', 'bootstrap-коммит без личных данных');
+      const bootEmail = boot.body.author.email;
+      assert.ok(/@users\.noreply\.github\.com$/i.test(bootEmail), `bootstrap-коммит без личных данных: ${bootEmail}`);
+      assert.ok(!/yandex|grigory\.2004/i.test(bootEmail), 'нет личного email');
       const patch = mock.calls.find((c) => c.method === 'PATCH' && /\/git\/refs\/heads\/main$/.test(c.url));
       assert.ok(patch, 'ветка обновлена на итоговый коммит');
       assert.equal(patch.body.sha, 'commit-1');

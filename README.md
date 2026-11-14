@@ -76,6 +76,20 @@ Deeplink-кнопки кладут в клиент конфиг с запуск�
 **Для агентов со skills:** в репозитории есть `skills/wb-mcp/SKILL.md` — агент (Claude Code, Cursor,
 Codex) может прочитать его и поставить сервер сам через `npx skills add Gregory-mcbit/wildberries-mcp`.
 
+### npm и MCP Registry
+
+Пакет публикуется в npm как **`wb-mcp`**, а карточка — в официальном реестре MCP
+(`io.github.gregory-mcbit/wb-mcp`). После публикации установка одной командой:
+
+```bash
+npx -y -p wb-mcp wb-mcp-install --client all --token <WB_API_TOKEN>
+```
+
+```text
+npm:          https://www.npmjs.com/package/wb-mcp
+MCP Registry: https://registry.modelcontextprotocol.io  (поиск: wb-mcp)
+```
+
 ### Установка без репозитория (по ссылке на GitHub)
 
 ```bash

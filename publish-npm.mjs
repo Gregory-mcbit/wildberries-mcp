@@ -74,8 +74,11 @@ export async function publishNpm({ dir = HERE, dryRun = false, otp, npmBinary = 
   if (token) childEnv.npm_config_//registry.npmjs.org/:_authToken = token;
 
   log(`· npm ${args.join(' ')}`);
-  const binary = process.platform === 'win32' && npmBinary === 'npm' ? 'npm.cmd' : npmBinary;
-  const result = spawnSync(binary, args, { cwd: dir, encoding: 'utf8', env: childEnv });
+  // npm is a .cmd shim on Windows, so run it through the platform shell.
+  const command = [npmBinary, ...args].map((part) => (/[\s"]/.test(part) ? `"${String(part).replace(/"/g, '\\"')}"` : part)).join(' ');
+  const shell = process.platform === 'win32' ? process.env.ComSpec || 'cmd.exe' : '/bin/sh';
+  const shellArgs = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command];
+  const result = spawnSync(shell, shellArgs, { cwd: dir, encoding: 'utf8', env: childEnv });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
   if (output) log(output);
   if (result.status !== 0) throw new Error(`npm publish exited with ${result.status}`);
