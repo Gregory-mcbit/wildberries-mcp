@@ -39,6 +39,8 @@ jobs:
         run: node test/mcpb.test.mjs
       - name: Deeplink tests
         run: node test/deeplinks.test.mjs
+      - name: npm / MCP Registry metadata tests
+        run: node test/npm-package.test.mjs
       - name: Build catalog from sample specs
         run: node sync.mjs --from-dir test/specs-sample --out catalog-ci
       - name: Verify catalog structure and coverage

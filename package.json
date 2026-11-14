@@ -34,7 +34,7 @@
     "verify": "node verify.mjs",
     "install-mcp": "node install.mjs",
     "publish:gh": "node publish-gh.mjs",
-    "test": "node test/yaml.test.mjs && node test/sync.test.mjs && node test/mcp.test.mjs && node test/publish.test.mjs && node test/package.test.mjs && node test/bundle.test.mjs && node test/doctor.test.mjs && node test/tokenstore.test.mjs && node test/mcpb.test.mjs && node test/deeplinks.test.mjs"
+    "test": "node test/yaml.test.mjs && node test/sync.test.mjs && node test/mcp.test.mjs && node test/publish.test.mjs && node test/package.test.mjs && node test/bundle.test.mjs && node test/doctor.test.mjs && node test/tokenstore.test.mjs && node test/mcpb.test.mjs && node test/deeplinks.test.mjs && node test/npm-package.test.mjs"
   },
   "repository": {
     "type": "git",
@@ -46,10 +46,16 @@
     "wildberries",
     "wb",
     "seller-api",
-    "ai",
+    "marketplace",
     "cursor",
     "claude",
-    "codex"
+    "codex",
+    "gemini",
+    "ai"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "mcpName": "io.github.gregory-mcbit/wb-mcp",
+  "publishConfig": {
+    "access": "public"
+  }
 }

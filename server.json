@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.gregory-mcbit/wb-mcp",
+  "title": "Wildberries MCP",
+  "description": "MCP server for the full Wildberries Seller API: 309 methods, local, zero dependencies",
+  "repository": {
+    "url": "https://github.com/Gregory-mcbit/wildberries-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "wb-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "WB_API_TOKEN",
+          "description": "Wildberries Seller API token (Seller cabinet → API integrations)",
+          "format": "string",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
