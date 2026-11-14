@@ -1,0 +1,55 @@
+{
+  "name": "wb-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for the full Wildberries Seller API: all official OpenAPI methods, zero dependencies, no VPS needed",
+  "type": "module",
+  "bin": {
+    "wb-mcp": "./server.mjs",
+    "wb-mcp-sync": "./sync.mjs",
+    "wb-mcp-verify": "./verify.mjs",
+    "wb-mcp-doctor": "./doctor.mjs",
+    "wb-mcp-install": "./install.mjs"
+  },
+  "files": [
+    "server.mjs",
+    "sync.mjs",
+    "yaml.mjs",
+    "search.mjs",
+    "tokens.mjs",
+    "tokenstore.mjs",
+    "verify.mjs",
+    "doctor.mjs",
+    "install.mjs",
+    "README.md",
+    "README.en.md",
+    "AGENT-INSTALL.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "sync": "node sync.mjs",
+    "verify": "node verify.mjs",
+    "install-mcp": "node install.mjs",
+    "publish:gh": "node publish-gh.mjs",
+    "test": "node test/yaml.test.mjs && node test/sync.test.mjs && node test/mcp.test.mjs && node test/publish.test.mjs && node test/package.test.mjs && node test/bundle.test.mjs && node test/doctor.test.mjs && node test/tokenstore.test.mjs && node test/mcpb.test.mjs && node test/deeplinks.test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Gregory-mcbit/wildberries-mcp.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "wildberries",
+    "wb",
+    "seller-api",
+    "ai",
+    "cursor",
+    "claude",
+    "codex"
+  ],
+  "license": "MIT"
+}

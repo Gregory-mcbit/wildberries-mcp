@@ -1,1 +1,19 @@
+catalog/
+catalog-*/
+# downloaded specs cache (never commit WB specs)
+specs-raw/
+
+# local artifacts
+node_modules/
+.npm-cache/
+dist/
+*.mcpb
+*.tgz
+*.bak-*
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
 
