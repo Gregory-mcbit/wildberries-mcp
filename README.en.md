@@ -104,7 +104,8 @@ Or ask the assistant: "update the Wildberries catalog".
 ## Security
 
 - The token is stored in an encrypted file (AES-256-GCM); client settings contain only the path to
-  it. On Windows the encryption key is protected by **DPAPI** and bound to your Windows account.
+  it. The key is kept in the system keychain: **DPAPI** on Windows, **Keychain** on macOS,
+  **libsecret** on Linux.
 - Requests go only to Wildberries hosts and **only over HTTPS** — `http://` is blocked.
 - Mutating requests require confirmation: the server refuses the write until the assistant echoes
   the confirmation id that states what is about to change.
@@ -113,11 +114,11 @@ Or ask the assistant: "update the Wildberries catalog".
 - Reads and writes are separated, and a read-only token cannot change anything by design.
 - Logs contain no request bodies or response data.
 
-**Honest note on token storage:** on Windows the key is DPAPI-protected — only your account on this
-machine can decrypt it. On macOS/Linux the key still sits in a file next to the data (Keychain /
-libsecret coming later). No scheme protects against malware running as your OS user. Do not pass the
-token as a `--token` argument (it lands in shell history) — use the `WB_API_TOKEN` environment
-variable or the interactive installer instead.
+**Honest note on token storage:** the key lives in the system keychain — DPAPI on Windows, Keychain
+on macOS, libsecret on Linux (if the secret service is unavailable, the key falls back to a file next
+to the data). No scheme protects against malware running as your OS user. Do not pass the token as a
+`--token` argument (it lands in shell history) — use the `WB_API_TOKEN` environment variable or the
+interactive installer instead.
 
 ## License
 

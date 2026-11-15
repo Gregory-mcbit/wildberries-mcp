@@ -24,7 +24,7 @@ import { describeToken, loadTokenAccounts } from './tokens.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export const NAME = 'wb-mcp';
-export const VERSION = '0.1.2';
+export const VERSION = '0.1.3';
 export const SUPPORTED_VERSIONS = ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const LEGACY_DEFAULT_VERSION = '2025-06-18';
 

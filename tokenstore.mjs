@@ -42,7 +42,7 @@ function readKey(keyFile, keyring) {
     } catch {
       throw new Error(`key file ${keyFile} is not valid JSON`);
     }
-    return keyring.unprotectKey(blob);
+    return keyring.unprotectKey(blob, { id: keyFile });
   }
   // Legacy key file: a raw base64 32-byte key from older versions.
   const key = Buffer.from(text, 'base64');
@@ -51,9 +51,22 @@ function readKey(keyFile, keyring) {
 }
 
 function writeKey(keyFile, key, keyring) {
-  const blob = keyring.protectKey(key);
+  const blob = keyring.protectKey(key, { id: keyFile });
   writeFileSync(keyFile, JSON.stringify({ v: 1, scheme: blob.scheme, data: blob.data }) + '\n', { mode: 0o600 });
   restrict(keyFile);
+}
+
+// Best-effort upgrade of a legacy raw key file to a keyring-protected blob.
+function migrateKeyIfLegacy(keyFile, keyring) {
+  try {
+    const text = readFileSync(keyFile, 'utf8').trim();
+    if (text.startsWith('{')) return;
+    const key = Buffer.from(text, 'base64');
+    if (key.length !== 32) return;
+    writeKey(keyFile, key, keyring);
+  } catch {
+    // Leaving a legacy raw key is still functional; migration is best-effort.
+  }
 }
 
 // Encrypts `token` into `file` (JSON: {v, alg, iv, tag, data}) and creates the
@@ -77,6 +90,7 @@ export function saveTokenToFile(token, { file, keyFile = defaultKeyFile(file), k
   const payload = { v: 1, alg: ALG, iv: iv.toString('base64'), tag: tag.toString('base64'), data: data.toString('base64') };
   writeFileSync(file, JSON.stringify(payload) + '\n', { mode: 0o600 });
   restrict(file);
+  migrateKeyIfLegacy(keyFile, keyring);
   return { file, keyFile };
 }
 
@@ -98,7 +112,9 @@ export function loadTokenFromFile(file, { keyFile = defaultKeyFile(file), keyrin
   const decipher = createDecipheriv(ALG, key, iv);
   decipher.setAuthTag(tag);
   try {
-    return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+    const token = Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+    migrateKeyIfLegacy(keyFile, keyring);
+    return token;
   } catch {
     throw new Error(`token file ${file} cannot be decrypted (wrong key or tampered data)`);
   }

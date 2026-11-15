@@ -76,6 +76,16 @@ async function main() {
       assert.equal(loadTokenFromFile(tokenFile, { keyFile, keyring: fakeKeyring }), `${TOKEN}-2`);
     });
 
+    await test('legacy raw-ключ мигрирует в keyring-блоб при чтении', async () => {
+      const legacyKey = '0123456789abcdef0123456789abcdef'; // 32 bytes = fakeKeyring key
+      saveTokenToFile(TOKEN, { file: tokenFile, keyFile, keyring: fakeKeyring });
+      await writeFile(keyFile, Buffer.from(legacyKey, 'utf8').toString('base64'));
+      assert.equal(loadTokenFromFile(tokenFile, { keyFile, keyring: fakeKeyring }), TOKEN, 'legacy raw-ключ читается');
+      const after = JSON.parse(await readFile(keyFile, 'utf8'));
+      assert.equal(after.scheme, 'dpapi', 'ключ переписан в keyring-блоб (миграция)');
+      assert.equal(loadTokenFromFile(tokenFile, { keyFile, keyring: fakeKeyring }), TOKEN, 'после миграции читается');
+    });
+
     await test('подмена данных/чужой ключ не расшифровываются', async () => {
       const payload = JSON.parse(await readFile(tokenFile, 'utf8'));
       const tampered = { ...payload, data: Buffer.from('hacked').toString('base64') };
