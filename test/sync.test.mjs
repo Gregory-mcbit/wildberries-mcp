@@ -173,6 +173,16 @@ async function main() {
     assert.ok(existsSync(path.join(out, 'old-marker.json')), 'прежний каталог не удалён при ошибке');
   });
 
+  await test('writeCatalogBundle: структурно битый bundle не удаляет каталог', async () => {
+    const out = path.join(tmp, 'bundle-struct');
+    await mkdir(out, { recursive: true });
+    await writeFile(path.join(out, 'old-marker.json'), JSON.stringify({ keep: true }));
+    const bundle = { index: { meta: { modules: [] } }, modules: {} }; // no index.operations
+    await assert.rejects(() => writeCatalogBundle(bundle, out), /index\.operations/);
+    assert.ok(existsSync(path.join(out, 'old-marker.json')), 'прежний каталог цел');
+    assert.ok(!existsSync(path.join(out, 'index.json')), 'новый index не записан');
+  });
+
   await rm(tmp, { recursive: true, force: true });
   console.log(`\n${passed} passed, ${failed} failed`);
   if (failed) {

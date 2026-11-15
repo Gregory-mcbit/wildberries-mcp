@@ -109,8 +109,8 @@ async function checkCatalog(env, explicitDir, includeDefaults) {
   };
 }
 
-function checkToken(env) {
-  const { accounts, errors } = loadTokenAccounts(env);
+function checkToken(env, { keyring } = {}) {
+  const { accounts, errors } = loadTokenAccounts(env, { keyring });
   if (!accounts.size) {
     return {
       id: 'token',
@@ -206,11 +206,11 @@ async function checkApp() {
   };
 }
 
-export async function runDoctor({ env = process.env, fetchImpl = globalThis.fetch, catalogDir = get('--catalog'), includeDefaultCatalog = true } = {}) {
+export async function runDoctor({ env = process.env, fetchImpl = globalThis.fetch, catalogDir = get('--catalog'), includeDefaultCatalog = true, keyring } = {}) {
   const checks = [];
   checks.push(await checkNode());
   checks.push(await checkCatalog(env, catalogDir, includeDefaultCatalog));
-  checks.push(checkToken(env));
+  checks.push(checkToken(env, { keyring }));
   checks.push(
     await checkNetwork(
       fetchImpl,

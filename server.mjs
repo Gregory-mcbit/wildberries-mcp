@@ -24,7 +24,7 @@ import { describeToken, loadTokenAccounts } from './tokens.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export const NAME = 'wb-mcp';
-export const VERSION = '0.1.5';
+export const VERSION = '0.1.6';
 export const SUPPORTED_VERSIONS = ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const LEGACY_DEFAULT_VERSION = '2025-06-18';
 
@@ -637,6 +637,9 @@ export function createMcpServer({ env = process.env, input, output, error = proc
     readOnlyMode: env.WB_READONLY === '1' || env.WB_READONLY === 'true',
     // Обязательное подтверждение изменяющих запросов (wb_call/wb_request). Отключить: WB_CONFIRM_WRITES=0.
     confirmWrites: env.WB_CONFIRM_WRITES !== '0' && env.WB_CONFIRM_WRITES !== 'false',
+    // WB_CONFIRM_HUMAN=require: запись только с подтверждением человеком через elicitation;
+    // sampling и двухэтапное подтверждение агентом не считаются согласием человека.
+    confirmHuman: env.WB_CONFIRM_HUMAN === 'require',
     // Для хостов wildberries.ru разрешён только https://. Отключить (тесты): WB_ALLOW_HTTP=1.
     allowHttp: env.WB_ALLOW_HTTP === '1',
     allowAnyHost: env.WB_ALLOW_ANY_HOST === '1',
@@ -1132,6 +1135,12 @@ export function createMcpServer({ env = process.env, input, output, error = proc
     if (!op.readonly && config.confirmWrites) {
       const fingerprint = approvalFingerprint({ method: op.method, url: url.toString(), params, body: args.body, token: account.token });
       const channel = approvalChannel();
+      if (config.confirmHuman && channel !== 'elicitation') {
+        throw new ToolError(
+          `Требуется подтверждение человека (WB_CONFIRM_HUMAN=require), но клиент не поддерживает elicitation ` +
+            `(канал: ${channel}). Включите клиент с поддержкой elicitation или уберите требование.`,
+        );
+      }
       if (!args.confirm) {
         const confirmId = issueApproval(fingerprint);
         return {
@@ -1454,6 +1463,12 @@ export function createMcpServer({ env = process.env, input, output, error = proc
       if (config.confirmWrites) {
         const fingerprint = approvalFingerprint({ method, url: url.toString(), params: args.query ?? null, body: args.body ?? null, token: account.token });
         const channel = approvalChannel();
+        if (config.confirmHuman && channel !== 'elicitation') {
+          throw new ToolError(
+            `Требуется подтверждение человека (WB_CONFIRM_HUMAN=require), но клиент не поддерживает elicitation ` +
+              `(канал: ${channel}). Включите клиент с поддержкой elicitation или уберите требование.`,
+          );
+        }
         if (!args.confirm) {
           const confirmId = issueApproval(fingerprint);
           return {

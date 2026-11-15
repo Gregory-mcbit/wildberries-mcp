@@ -25,6 +25,7 @@
 //   node sync.mjs --verbose
 
 import { mkdir, readdir, readFile, writeFile, rm, rename } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseYaml } from './yaml.mjs';
@@ -659,10 +660,10 @@ export async function loadCatalogBundle(file) {
 }
 
 // Unpacks a bundle written by createCatalogBundle into a catalog directory.
-// The bundle is fully validated and written into a staging directory first, so a
-// malicious/corrupt bundle can never destroy the previous working catalog.
+// The bundle is fully validated (structure included) and written into a staging
+// directory first; the previous catalog is moved to a backup and restored if the
+// swap fails, so a corrupt bundle can never destroy a working catalog.
 export async function writeCatalogBundle(bundle, outDir) {
-  if (!bundle?.index?.meta || !bundle?.modules) throw new Error('bundle is malformed: index/modules missing');
   const root = path.resolve(outDir);
   const safeName = (key) => {
     if (typeof key !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(key)) {
@@ -674,30 +675,61 @@ export async function writeCatalogBundle(bundle, outDir) {
     }
     return `${key}.json`;
   };
-  // Validate every module name before touching anything on disk.
-  const entries = Object.entries(bundle.modules).map(([key, module]) => [safeName(key), module]);
 
-  const staging = path.join(path.dirname(root), `.${path.basename(root)}.tmp-${process.pid}-${Date.now()}`);
-  await mkdir(staging, { recursive: true });
+  // Full structural validation BEFORE anything touches the disk.
+  if (!bundle || typeof bundle !== 'object') throw new Error('bundle is malformed: not an object');
+  const index = bundle.index;
+  if (!index || typeof index !== 'object') throw new Error('bundle is malformed: index missing');
+  if (!index.meta || typeof index.meta !== 'object') throw new Error('bundle is malformed: index.meta missing');
+  if (!Array.isArray(index.operations)) throw new Error('bundle is malformed: index.operations must be an array');
+  for (const op of index.operations) {
+    if (!op || typeof op !== 'object' || typeof op.id !== 'string') {
+      throw new Error('bundle is malformed: every index.operations entry must be an object with a string id');
+    }
+  }
+  if (!bundle.modules || typeof bundle.modules !== 'object' || Array.isArray(bundle.modules)) {
+    throw new Error('bundle is malformed: modules must be an object');
+  }
+  const entries = Object.entries(bundle.modules).map(([key, module]) => {
+    if (!module || typeof module !== 'object' || !Array.isArray(module.operations)) {
+      throw new Error(`bundle is malformed: module "${key}" must be an object with operations[]`);
+    }
+    return [safeName(key), module];
+  });
+
+  // Stats are computed from the validated bundle, so nothing can throw after the swap.
+  const stats = {
+    modules: Object.keys(bundle.modules).length,
+    operations: index.operations.length,
+    readonly: index.operations.filter((op) => op.readonly).length,
+    write: index.operations.filter((op) => !op.readonly).length,
+    file: index.operations.filter((op) => op.file).length,
+    generatedAt: index.meta.generatedAt,
+  };
+
+  const stamp = `${process.pid}-${Date.now()}`;
+  const staging = path.join(path.dirname(root), `.${path.basename(root)}.tmp-${stamp}`);
+  const backup = path.join(path.dirname(root), `.${path.basename(root)}.old-${stamp}`);
   try {
-    await writeFile(path.join(staging, 'index.json'), JSON.stringify(bundle.index));
+    await mkdir(staging, { recursive: true });
+    await writeFile(path.join(staging, 'index.json'), JSON.stringify(index));
     for (const [file, module] of entries) {
       await writeFile(path.join(staging, file), JSON.stringify(module));
     }
-    await rm(root, { recursive: true, force: true });
-    await rename(staging, root);
+    const hadOld = existsSync(root);
+    if (hadOld) await rename(root, backup);
+    try {
+      await rename(staging, root);
+    } catch (err) {
+      if (hadOld) await rename(backup, root).catch(() => {});
+      throw err;
+    }
+    if (hadOld) await rm(backup, { recursive: true, force: true }).catch(() => {});
   } catch (err) {
     await rm(staging, { recursive: true, force: true }).catch(() => {});
     throw err;
   }
-  return {
-    modules: Object.keys(bundle.modules).length,
-    operations: bundle.index.operations.length,
-    readonly: bundle.index.operations.filter((op) => op.readonly).length,
-    write: bundle.index.operations.filter((op) => !op.readonly).length,
-    file: bundle.index.operations.filter((op) => op.file).length,
-    generatedAt: bundle.index.meta.generatedAt,
-  };
+  return stats;
 }
 
 // ---------------------------------------------------------------------------

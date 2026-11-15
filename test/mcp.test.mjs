@@ -618,6 +618,40 @@ async function main() {
       }
     });
 
+    await test('WB_CONFIRM_HUMAN=require: без elicitation запись запрещена', async () => {
+      const srv = await startServer({ ...env, WB_MCP_CATALOG: writeCatalogDir, WB_CONFIRM_WRITES: '1', WB_CONFIRM_HUMAN: 'require' });
+      try {
+        const before = mock.state.requests.length;
+        const res = await srv.rpc.tool('wb_call', { id: 'postV1Drafts' });
+        assert.equal(res.isError, true, res.text);
+        assert.ok(res.text.includes('WB_CONFIRM_HUMAN'), res.text);
+        assert.equal(mock.state.requests.length, before, 'запрос не ушёл');
+      } finally {
+        await srv.stop();
+      }
+    });
+
+    await test('WB_CONFIRM_HUMAN=require: с elicitation согласие разрешает запись', async () => {
+      const srv = await startServer(
+        { ...env, WB_MCP_CATALOG: writeCatalogDir, WB_CONFIRM_WRITES: '1', WB_CONFIRM_HUMAN: 'require' },
+        { elicitationReply: { action: 'accept', content: { approve: true } } },
+      );
+      try {
+        await srv.rpc.request('initialize', {
+          protocolVersion: '2025-06-18',
+          capabilities: { elicitation: {} },
+          clientInfo: { name: 't', version: '1' },
+        });
+        const first = await srv.rpc.tool('wb_call', { id: 'postV1Drafts' });
+        assert.equal(first.structuredContent.humanApproval, 'elicitation');
+        const before = mock.state.requests.length;
+        await srv.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: first.structuredContent.confirmId });
+        assert.equal(mock.state.requests.length, before + 1, 'запрос выполнен после согласия');
+      } finally {
+        await srv.stop();
+      }
+    });
+
     await test('wb_request: POST без confirm блокируется, с confirm — выполняется', async () => {
       const confirmServer = await startServer({ ...env, WB_CONFIRM_WRITES: '1' });
       try {

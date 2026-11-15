@@ -54,14 +54,14 @@ export function describeToken(token) {
 
 // Reads accounts from env. WB_TOKEN_FILE points to an encrypted token written by
 // install.mjs (AES-256-GCM), so the token never has to live in client configs.
-export function loadTokenAccounts(env = process.env) {
+export function loadTokenAccounts(env = process.env, { keyring } = {}) {
   const accounts = new Map();
   const errors = [];
   const single = env.WB_API_TOKEN;
   if (single && single.trim() && !single.includes('<')) accounts.set('default', single.trim());
   if (env.WB_TOKEN_FILE) {
     try {
-      accounts.set('default', loadTokenFromFile(env.WB_TOKEN_FILE, { keyFile: env.WB_TOKEN_KEY }));
+      accounts.set('default', loadTokenFromFile(env.WB_TOKEN_FILE, { keyFile: env.WB_TOKEN_KEY, keyring }));
     } catch (err) {
       errors.push(`WB_TOKEN_FILE (${env.WB_TOKEN_FILE}): ${err.message}`);
     }
@@ -80,7 +80,7 @@ export function loadTokenAccounts(env = process.env) {
         }
         const keyFile = typeof spec === 'string' ? `${file}.key` : (spec.key ?? `${file}.key`);
         try {
-          accounts.set(name, loadTokenFromFile(file, { keyFile }));
+          accounts.set(name, loadTokenFromFile(file, { keyFile, keyring }));
         } catch (err) {
           errors.push(`WB_TOKEN_FILES (${name}): ${err.message}`);
         }

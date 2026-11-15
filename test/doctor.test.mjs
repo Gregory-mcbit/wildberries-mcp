@@ -44,6 +44,14 @@ const failFetch = async () => {
 };
 const checkById = (report, id) => report.checks.find((c) => c.id === id);
 
+// Deterministic file-scheme keyring: keeps this test independent of PowerShell /
+// OS keychain availability (CI may run in a restricted environment).
+const fileKeyring = {
+  generateKey: () => Buffer.from('0123456789abcdef0123456789abcdef', 'utf8'),
+  protectKey: (key) => ({ scheme: 'file', data: key.toString('base64') }),
+  unprotectKey: (blob) => Buffer.from(blob.data, 'base64'),
+};
+
 async function main() {
   const tmp = await mkdtemp(path.join(os.tmpdir(), 'wb-mcp-doctor-'));
   const catalogDir = path.join(tmp, 'catalog');
@@ -73,10 +81,11 @@ async function main() {
     await test('зашифрованный токен: doctor не падает и показывает схему ключа', async () => {
       const encFile = path.join(tmp, 'token.enc');
       const keyFile = path.join(tmp, 'token.key');
-      saveTokenToFile(RW_TOKEN, { file: encFile, keyFile });
+      saveTokenToFile(RW_TOKEN, { file: encFile, keyFile, keyring: fileKeyring });
       const report = await runDoctor({
         env: { WB_MCP_CATALOG: catalogDir, WB_TOKEN_FILE: encFile, WB_TOKEN_KEY: keyFile },
         fetchImpl: okFetch,
+        keyring: fileKeyring,
       });
       const token = checkById(report, 'token');
       assert.equal(token.status, 'ok', token.detail);

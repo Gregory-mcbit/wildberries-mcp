@@ -1,6 +1,6 @@
 {
   "name": "wildberries-seller-mcp",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Wildberries Seller API for AI assistants: catalog from official OpenAPI specs, local MCP server, zero dependencies",
   "type": "module",
   "bin": {
