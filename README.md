@@ -48,15 +48,28 @@ npx -y -p wildberries-seller-mcp wb-mcp-install --client all --token <ваш_т�
 
 ### Или установите в конкретный клиент
 
+Все установочные файлы лежат на странице
+[Releases → catalog](https://github.com/Gregory-mcbit/wildberries-mcp/releases/tag/catalog).
+
 | Клиент | Что сделать |
 |---|---|
-| **Claude Desktop** | Скачайте файл `wb-mcp.mcpb` на странице Releases и откройте его двойным кликом. Claude сам предложит окно, куда нужно вставить токен. |
+| **Claude Desktop** | Скачайте [wb-mcp.mcpb](https://github.com/Gregory-mcbit/wildberries-mcp/releases/download/catalog/wb-mcp.mcpb) и откройте файл двойным кликом. Claude сам предложит окно, куда нужно вставить токен. |
 | **Cursor** | [Установить в Cursor](https://cursor.com/install-mcp?name=wb&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIi1wIiwiZ2l0aHViOkdyZWdvcnktbWNiaXQvd2lsZGJlcnJpZXMtbWNwIiwid2ItbWNwIl0sImVudiI6eyJXQl9BVVRPX1NZTkMiOiIxIiwiV0JfQVBJX1RPS0VOIjoiUEFTVEVfWU9VUl9XQl9BUElfVE9LRU4ifX0%3D) — откроется окно установки в Cursor. После этого откройте конфигурацию MCP и замените текст `PASTE_YOUR_WB_API_TOKEN` на свой токен. Это единственное место, где нужно что-то вписать. |
-| **VS Code** | [Установить в VS Code](vscode:mcp/install?%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22-p%22%2C%22github%3AGregory-mcbit%2Fwildberries-mcp%22%2C%22wb-mcp%22%5D%2C%22env%22%3A%7B%22WB_AUTO_SYNC%22%3A%221%22%2C%22WB_API_TOKEN%22%3A%22PASTE_YOUR_WB_API_TOKEN%22%7D%7D) — VS Code покажет окно подтверждения. Если окно не открылось, запустите универсальный установщик выше, он сделает то же самое. |
+| **VS Code** | [Установить в VS Code](vscode:mcp/install?%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22-p%22%2C%22github%3AGregory-mcbit%2Fwildberries-mcp%22%2C%22wb-mcp%22%5D%2C%22env%22%3A%7B%22WB_AUTO_SYNC%22%3A%221%22%2C%22WB_API_TOKEN%22%3A%22PASTE_YOUR_WB_API_TOKEN%22%7D%7D) — откроется окно подтверждения установки. Если окно не открылось, запустите универсальный установщик выше, результат будет тот же. |
 | **Claude Code** | `claude mcp add wb --env WB_API_TOKEN=<токен> -- node <путь>/server.mjs` |
 | **Codex CLI** | `codex mcp add wb --env WB_API_TOKEN=<токен> -- node <путь>/server.mjs` |
 | **Gemini CLI** | `gemini mcp add wb --env WB_API_TOKEN=<токен> -- node <путь>/server.mjs` |
-| **Без установки** | Скачайте `wb-mcp-portable.zip` из Releases, распакуйте и запустите `install.cmd` (Windows) или `install.sh` (macOS/Linux). |
+| **Без установки** | Скачайте [wb-mcp-portable.zip](https://github.com/Gregory-mcbit/wildberries-mcp/releases/download/catalog/wb-mcp-portable.zip), распакуйте и запустите `install.cmd` (Windows) или `install.sh` (macOS/Linux). |
+
+### Можно поручить установку ассистенту
+
+Не хотите ставить руками — дайте ассистенту ссылку на репозиторий и попросите:
+
+> «Подключи wb-mcp из https://github.com/Gregory-mcbit/wildberries-mcp по инструкции AGENT-INSTALL.md»
+
+Ассистент откроет [AGENT-INSTALL.md](https://github.com/Gregory-mcbit/wildberries-mcp/blob/main/AGENT-INSTALL.md),
+скачает репозиторий, запустит установщик, сохранит токен в зашифрованном виде и проверит подключение
+через `doctor`. Токен он спросит у вас.
 
 ### 3. Перезапустите ассистента и проверьте
 
