@@ -70,7 +70,7 @@ async function main() {
     for (const file of pkg.files ?? []) {
       assert.ok(await exists(path.join(ROOT, file)), `${file} существует`);
     }
-    for (const required of ['server.mjs', 'sync.mjs', 'yaml.mjs', 'search.mjs', 'tokens.mjs', 'tokenstore.mjs', 'verify.mjs', 'doctor.mjs', 'install.mjs', 'README.md', 'AGENT-INSTALL.md', 'LICENSE']) {
+    for (const required of ['server.mjs', 'sync.mjs', 'yaml.mjs', 'search.mjs', 'tokens.mjs', 'tokenstore.mjs', 'keyring.mjs', 'verify.mjs', 'doctor.mjs', 'install.mjs', 'README.md', 'AGENT-INSTALL.md', 'LICENSE']) {
       assert.ok(pkg.files.includes(required), `${required} в files (нужен npx-пользователям)`);
     }
   });
@@ -90,7 +90,7 @@ async function main() {
 
   await test('install.mjs копирует все runtime-файлы', async () => {
     const source = await readFile(path.join(ROOT, 'install.mjs'), 'utf8');
-    for (const file of ['server.mjs', 'sync.mjs', 'yaml.mjs', 'search.mjs', 'tokens.mjs', 'tokenstore.mjs', 'verify.mjs', 'doctor.mjs']) {
+    for (const file of ['server.mjs', 'sync.mjs', 'yaml.mjs', 'search.mjs', 'tokens.mjs', 'tokenstore.mjs', 'keyring.mjs', 'verify.mjs', 'doctor.mjs']) {
       assert.ok(source.includes(`'${file}'`), `${file} в списке FILES установщика`);
     }
   });

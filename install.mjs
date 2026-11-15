@@ -27,7 +27,7 @@ import { buildCatalog, loadCatalogBundle, writeCatalogBundle } from './sync.mjs'
 import { saveTokenToFile } from './tokenstore.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const FILES = ['server.mjs', 'sync.mjs', 'yaml.mjs', 'search.mjs', 'tokens.mjs', 'tokenstore.mjs', 'verify.mjs', 'doctor.mjs', 'package.json', 'README.md', 'AGENT-INSTALL.md', 'LICENSE'];
+const FILES = ['server.mjs', 'sync.mjs', 'yaml.mjs', 'search.mjs', 'tokens.mjs', 'tokenstore.mjs', 'keyring.mjs', 'verify.mjs', 'doctor.mjs', 'package.json', 'README.md', 'AGENT-INSTALL.md', 'LICENSE'];
 
 const argv = process.argv.slice(2);
 const has = (name) => argv.includes(name);

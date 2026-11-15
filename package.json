@@ -1,6 +1,6 @@
 {
   "name": "wildberries-seller-mcp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "MCP server for the full Wildberries Seller API: all official OpenAPI methods, zero dependencies, no VPS needed",
   "type": "module",
   "bin": {
@@ -17,6 +17,7 @@
     "search.mjs",
     "tokens.mjs",
     "tokenstore.mjs",
+    "keyring.mjs",
     "verify.mjs",
     "doctor.mjs",
     "install.mjs",

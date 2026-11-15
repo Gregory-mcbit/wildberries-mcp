@@ -33,6 +33,7 @@ export const SERVER_FILES = [
   'search.mjs',
   'tokens.mjs',
   'tokenstore.mjs',
+  'keyring.mjs',
   'verify.mjs',
   'package.json',
   'LICENSE',
