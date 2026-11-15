@@ -160,16 +160,17 @@ async function main() {
     assert.deepEqual(a.operations.map((o) => o.id), b.operations.map((o) => o.id));
   });
 
-  await test('writeCatalogBundle: имя модуля с выходом из папки отклоняется', async () => {
+  await test('writeCatalogBundle: небезопасный модуль отклоняется, старый каталог цел', async () => {
     const out = path.join(tmp, 'bundle-out');
     await mkdir(out, { recursive: true });
+    await writeFile(path.join(out, 'old-marker.json'), JSON.stringify({ keep: true }));
     const bundle = {
       index: { meta: { modules: ['evil'], totalOps: 0 }, operations: [] },
       modules: { '../escaped': { moduleKey: 'x', operations: [] } },
     };
     await assert.rejects(() => writeCatalogBundle(bundle, out), /небезопасное имя|выходит за пределы/);
-    const escaped = path.join(tmp, 'escaped.json');
-    assert.ok(!existsSync(escaped), 'файл вне каталога не создан');
+    assert.ok(!existsSync(path.join(tmp, 'escaped.json')), 'файл вне каталога не создан');
+    assert.ok(existsSync(path.join(out, 'old-marker.json')), 'прежний каталог не удалён при ошибке');
   });
 
   await rm(tmp, { recursive: true, force: true });

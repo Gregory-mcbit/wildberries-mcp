@@ -212,6 +212,7 @@ export const PORTABLE_FILES = [
   ...SERVER_FILES,
   'doctor.mjs',
   'install.mjs',
+  'accounts.mjs',
   'deeplinks.mjs',
   'README.md',
   'README.en.md',

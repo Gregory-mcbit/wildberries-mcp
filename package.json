@@ -1,6 +1,6 @@
 {
   "name": "wildberries-seller-mcp",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Wildberries Seller API for AI assistants: catalog from official OpenAPI specs, local MCP server, zero dependencies",
   "type": "module",
   "bin": {
@@ -18,6 +18,7 @@
     "tokens.mjs",
     "tokenstore.mjs",
     "keyring.mjs",
+    "accounts.mjs",
     "verify.mjs",
     "doctor.mjs",
     "install.mjs",
@@ -36,7 +37,7 @@
     "install-mcp": "node install.mjs",
     "test:live": "node live-smoke.mjs",
     "publish:gh": "node publish-gh.mjs",
-    "test": "node test/yaml.test.mjs && node test/sync.test.mjs && node test/mcp.test.mjs && node test/publish.test.mjs && node test/package.test.mjs && node test/bundle.test.mjs && node test/doctor.test.mjs && node test/tokenstore.test.mjs && node test/mcpb.test.mjs && node test/deeplinks.test.mjs && node test/npm-package.test.mjs"
+    "test": "node test/yaml.test.mjs && node test/sync.test.mjs && node test/mcp.test.mjs && node test/publish.test.mjs && node test/package.test.mjs && node test/bundle.test.mjs && node test/doctor.test.mjs && node test/tokenstore.test.mjs && node test/mcpb.test.mjs && node test/deeplinks.test.mjs && node test/npm-package.test.mjs && node test/accounts.test.mjs"
   },
   "repository": {
     "type": "git",

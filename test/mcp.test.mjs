@@ -87,6 +87,12 @@ async function startServer(env, opts = {}) {
       );
       return;
     }
+    // Server -> client request (elicitation/create): answer with a canned result.
+    if (typeof msg.method === 'string' && msg.id !== undefined && msg.method === 'elicitation/create') {
+      const result = typeof opts.elicitationReply === 'function' ? opts.elicitationReply(msg.params) : (opts.elicitationReply ?? { action: 'decline' });
+      input.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }) + '\n');
+      return;
+    }
     if (msg.id === undefined) {
       notifications.push(msg);
       return;
@@ -549,6 +555,66 @@ async function main() {
         assert.equal(mock.state.requests.at(-1).path, '/api/supplies/v1/drafts');
       } finally {
         await confirmServer.stop();
+      }
+    });
+
+    await test('wb_call: строгий разбор — "Не разрешить"/"Не подтверждаю"/"Нет" блокируют', async () => {
+      for (const reply of ['Не разрешить', 'Не подтверждаю', 'Нет', 'нет, нельзя']) {
+        const srv = await startServer({ ...env, WB_MCP_CATALOG: writeCatalogDir, WB_CONFIRM_WRITES: '1' }, { samplingReply: reply });
+        try {
+          await srv.rpc.request('initialize', {
+            protocolVersion: '2025-06-18',
+            capabilities: { sampling: {} },
+            clientInfo: { name: 't', version: '1' },
+          });
+          const first = await srv.rpc.tool('wb_call', { id: 'postV1Drafts' });
+          const before = mock.state.requests.length;
+          const res = await srv.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: first.structuredContent.confirmId });
+          assert.equal(res.isError, true, `"${reply}" должен блокировать: ${res.text}`);
+          assert.equal(mock.state.requests.length, before, `"${reply}" не должен выполнять запрос`);
+        } finally {
+          await srv.stop();
+        }
+      }
+    });
+
+    await test('wb_call: elicitation — approve выполняет, отказ блокирует', async () => {
+      const accept = await startServer(
+        { ...env, WB_MCP_CATALOG: writeCatalogDir, WB_CONFIRM_WRITES: '1' },
+        { elicitationReply: { action: 'accept', content: { approve: true } } },
+      );
+      try {
+        await accept.rpc.request('initialize', {
+          protocolVersion: '2025-06-18',
+          capabilities: { elicitation: {} },
+          clientInfo: { name: 't', version: '1' },
+        });
+        const first = await accept.rpc.tool('wb_call', { id: 'postV1Drafts' });
+        assert.equal(first.structuredContent.humanApproval, 'elicitation');
+        const before = mock.state.requests.length;
+        await accept.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: first.structuredContent.confirmId });
+        assert.equal(mock.state.requests.length, before + 1, 'после согласия запрос выполнен');
+      } finally {
+        await accept.stop();
+      }
+
+      const decline = await startServer(
+        { ...env, WB_MCP_CATALOG: writeCatalogDir, WB_CONFIRM_WRITES: '1' },
+        { elicitationReply: { action: 'accept', content: { approve: false } } },
+      );
+      try {
+        await decline.rpc.request('initialize', {
+          protocolVersion: '2025-06-18',
+          capabilities: { elicitation: {} },
+          clientInfo: { name: 't', version: '1' },
+        });
+        const first = await decline.rpc.tool('wb_call', { id: 'postV1Drafts' });
+        const before = mock.state.requests.length;
+        const res = await decline.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: first.structuredContent.confirmId });
+        assert.equal(res.isError, true);
+        assert.equal(mock.state.requests.length, before, 'без approve запрос не выполнен');
+      } finally {
+        await decline.stop();
       }
     });
 

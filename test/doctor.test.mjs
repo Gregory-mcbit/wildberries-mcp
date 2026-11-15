@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCatalog } from '../sync.mjs';
 import { runDoctor } from '../doctor.mjs';
+import { saveTokenToFile } from '../tokenstore.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(HERE, '..');
@@ -67,6 +68,19 @@ async function main() {
       const report = await runDoctor({ env: { WB_MCP_CATALOG: catalogDir }, fetchImpl: okFetch });
       assert.equal(checkById(report, 'token').status, 'warn');
       assert.equal(report.healthy, true);
+    });
+
+    await test('зашифрованный токен: doctor не падает и показывает схему ключа', async () => {
+      const encFile = path.join(tmp, 'token.enc');
+      const keyFile = path.join(tmp, 'token.key');
+      saveTokenToFile(RW_TOKEN, { file: encFile, keyFile });
+      const report = await runDoctor({
+        env: { WB_MCP_CATALOG: catalogDir, WB_TOKEN_FILE: encFile, WB_TOKEN_KEY: keyFile },
+        fetchImpl: okFetch,
+      });
+      const token = checkById(report, 'token');
+      assert.equal(token.status, 'ok', token.detail);
+      assert.ok(token.detail.includes('ключ'), `detail содержит схему ключа: ${token.detail}`);
     });
 
     await test('read-only токен: warn с подсказкой', async () => {

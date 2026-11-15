@@ -24,7 +24,7 @@ import { describeToken, loadTokenAccounts } from './tokens.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export const NAME = 'wb-mcp';
-export const VERSION = '0.1.4';
+export const VERSION = '0.1.5';
 export const SUPPORTED_VERSIONS = ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const LEGACY_DEFAULT_VERSION = '2025-06-18';
 
@@ -703,24 +703,70 @@ export function createMcpServer({ env = process.env, input, output, error = proc
     });
   }
 
+  // Строгая, fail-closed интерпретация ответа: отрицание или неизвестная фраза
+  // означают отказ. Никакого поиска «положительного слова» внутри текста.
+  function parseApprovalText(text) {
+    const normalized = String(text ?? '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return false;
+    if (/(^|\s)(не|нет|no|not|deny|отклон|отказ|запрещ|cancel|отмен)/u.test(normalized)) return false;
+    return /^(разрешить|разрешаю|подтверждаю|подтвердить|approve|approved|yes|да|ок|ok)$/u.test(normalized);
+  }
+
+  function approvalChannel() {
+    if (clientCapabilities.elicitation) return 'elicitation';
+    if (clientCapabilities.sampling) return 'sampling';
+    return 'unavailable';
+  }
+
   async function elicitApproval(summary) {
-    if (!clientCapabilities.sampling) return true; // нет доверенного канала — остаётся одноразовый nonce
-    try {
-      const result = await requestFromClient(
-        'sampling/createMessage',
-        {
-          messages: [{ role: 'user', content: { type: 'text', text: summary } }],
-          systemPrompt:
-            'Ты — контролёр операции записи в кабинет Wildberries. Ответь ровно одним словом: "Разрешить" или "Отклонить".',
-          maxTokens: 8,
-        },
-        config.httpTimeoutMs,
-      );
-      const text = String(result?.content?.text ?? '').trim().toLowerCase();
-      return /разрешить|approve|yes|да|подтверждаю/i.test(text);
-    } catch {
-      return false; // fail closed: без явного согласия не выполняем
+    const timeout = Math.min(config.httpTimeoutMs, 120_000);
+    // 1) elicitation — прямой запрос к человеку через клиент (предпочтительно).
+    if (clientCapabilities.elicitation) {
+      try {
+        const result = await requestFromClient(
+          'elicitation/create',
+          {
+            message: summary,
+            requestedSchema: {
+              type: 'object',
+              properties: { approve: { type: 'boolean', title: 'Выполнить изменение в кабинете Wildberries' } },
+              required: ['approve'],
+            },
+          },
+          timeout,
+        );
+        const approved = String(result?.action ?? '') === 'accept' && result?.content?.approve === true;
+        return { approved, channel: 'elicitation' };
+      } catch {
+        return { approved: false, channel: 'elicitation' };
+      }
     }
+    // 2) sampling — запрос к модели клиента; согласие человека не гарантируется,
+    //    поэтому ответ разбирается строго и при любой неоднозначности отклоняется.
+    if (clientCapabilities.sampling) {
+      try {
+        const result = await requestFromClient(
+          'sampling/createMessage',
+          {
+            messages: [{ role: 'user', content: { type: 'text', text: summary } }],
+            systemPrompt:
+              'Ты — контролёр операции записи в кабинет Wildberries. Ответь ровно одним словом: "Разрешить" или "Отклонить".',
+            maxTokens: 8,
+          },
+          timeout,
+        );
+        return { approved: parseApprovalText(result?.content?.text), channel: 'sampling' };
+      } catch {
+        return { approved: false, channel: 'sampling' };
+      }
+    }
+    // 3) Канала подтверждения человека нет: остаётся двухэтапное подтверждение
+    //    агентом с одноразовым кодом (явно помечается как 'unavailable').
+    return { approved: true, channel: 'unavailable' };
   }
 
   function pickAccount(name) {
@@ -1082,9 +1128,10 @@ export function createMcpServer({ env = process.env, input, output, error = proc
 
     // Обязательное подтверждение изменяющих методов: первый вызов не шлёт запрос,
     // а возвращает одноразовый id подтверждения; реальный запрос — только с совпавшим
-    // (и не использованным) id, а при наличии sampling — с явным согласием человека.
+    // (и не использованным) id и с согласием через elicitation/sampling (если клиент умеет).
     if (!op.readonly && config.confirmWrites) {
       const fingerprint = approvalFingerprint({ method: op.method, url: url.toString(), params, body: args.body, token: account.token });
+      const channel = approvalChannel();
       if (!args.confirm) {
         const confirmId = issueApproval(fingerprint);
         return {
@@ -1094,12 +1141,16 @@ export function createMcpServer({ env = process.env, input, output, error = proc
             ...(args.body !== undefined ? [`body: ${JSON.stringify(args.body)}`] : []),
             '',
             `Повтори вызов wb_call с "confirm": "${confirmId}" (код одноразовый, действует 5 минут).`,
+            channel === 'unavailable'
+              ? 'Внимание: клиент не умеет запрашивать согласие человека (elicitation/sampling) — действует двухэтапное подтверждение агентом.'
+              : `Согласие человека будет запрошено через ${channel}.`,
             'Отключить подтверждение (осознанный риск): env WB_CONFIRM_WRITES=0.',
           ].join('\n'),
           structured: {
             approvalRequired: true,
             confirmId,
             expiresInSec: APPROVAL_TTL_MS / 1000,
+            humanApproval: channel,
             method: op.method,
             path: url.pathname,
             params,
@@ -1109,14 +1160,13 @@ export function createMcpServer({ env = process.env, input, output, error = proc
       }
       const check = consumeApproval(args.confirm, fingerprint);
       if (!check.ok) throw new ToolError(`Подтверждение отклонено: ${check.reason}. Запусти операцию заново.`);
-      const approved = await elicitApproval(
+      const approval = await elicitApproval(
         `Разрешить изменение кабинета Wildberries?\n\n${op.method} ${url.pathname}\nparams: ${JSON.stringify(params)}\n` +
-          (args.body !== undefined ? `body: ${JSON.stringify(args.body)}` : '') +
-          '\n\nОтветь "Разрешить", чтобы выполнить, или "Отклонить", чтобы отменить.',
+          (args.body !== undefined ? `body: ${JSON.stringify(args.body)}` : ''),
       );
-      if (!approved) {
+      if (!approval.approved) {
         pendingApprovals.delete(String(args.confirm));
-        throw new ToolError('Пользователь отклонил изменение — операция не выполнена.');
+        throw new ToolError(`Пользователь отклонил изменение — операция не выполнена (канал: ${approval.channel}).`);
       }
     }
 
@@ -1403,6 +1453,7 @@ export function createMcpServer({ env = process.env, input, output, error = proc
       }
       if (config.confirmWrites) {
         const fingerprint = approvalFingerprint({ method, url: url.toString(), params: args.query ?? null, body: args.body ?? null, token: account.token });
+        const channel = approvalChannel();
         if (!args.confirm) {
           const confirmId = issueApproval(fingerprint);
           return {
@@ -1411,21 +1462,23 @@ export function createMcpServer({ env = process.env, input, output, error = proc
               ...(args.body !== undefined ? [`body: ${typeof args.body === 'string' ? args.body : JSON.stringify(args.body)}`] : []),
               '',
               `Повтори вызов wb_request с "confirm": "${confirmId}" (код одноразовый, действует 5 минут).`,
+              channel === 'unavailable'
+                ? 'Внимание: клиент не умеет запрашивать согласие человека (elicitation/sampling) — действует двухэтапное подтверждение агентом.'
+                : `Согласие человека будет запрошено через ${channel}.`,
               'Отключить подтверждение (осознанный риск): env WB_CONFIRM_WRITES=0.',
             ].join('\n'),
-            structured: { approvalRequired: true, confirmId, expiresInSec: APPROVAL_TTL_MS / 1000, method, path: url.pathname },
+            structured: { approvalRequired: true, confirmId, expiresInSec: APPROVAL_TTL_MS / 1000, humanApproval: channel, method, path: url.pathname },
           };
         }
         const check = consumeApproval(args.confirm, fingerprint);
         if (!check.ok) throw new ToolError(`Подтверждение отклонено: ${check.reason}. Запусти операцию заново.`);
-        const approved = await elicitApproval(
+        const approval = await elicitApproval(
           `Разрешить изменение кабинета Wildberries?\n\n${method} ${url.pathname}` +
-            (args.body !== undefined ? `\nbody: ${typeof args.body === 'string' ? args.body : JSON.stringify(args.body)}` : '') +
-            '\n\nОтветь "Разрешить", чтобы выполнить, или "Отклонить", чтобы отменить.',
+            (args.body !== undefined ? `\nbody: ${typeof args.body === 'string' ? args.body : JSON.stringify(args.body)}` : ''),
         );
-        if (!approved) {
+        if (!approval.approved) {
           pendingApprovals.delete(String(args.confirm));
-          throw new ToolError('Пользователь отклонил изменение — операция не выполнена.');
+          throw new ToolError(`Пользователь отклонил изменение — операция не выполнена (канал: ${approval.channel}).`);
         }
       }
     }

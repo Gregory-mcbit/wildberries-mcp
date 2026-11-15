@@ -133,7 +133,7 @@ function checkToken(env) {
     }
   }
   const first = rows[0];
-  const detail = rows
+  let detail = rows
     .map((r) => `${r.name}: ${r.valid ? 'ок' : 'невалиден'} · ${r.type ?? '?'} · категорий ${r.categories?.length ?? 0} · ${r.readOnly ? 'только чтение' : 'чтение/запись'} · до ${r.expiresAt ?? '?'}`)
     .join('; ');
   // Фактический способ хранения ключа шифрования (dpapi/keychain/libsecret/file/raw).

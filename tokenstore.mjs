@@ -19,6 +19,7 @@ import path from 'node:path';
 import * as defaultKeyring from './keyring.mjs';
 
 const ALG = 'aes-256-gcm';
+const defaultWarn = (message) => process.stderr.write(`[wb-mcp keyring] ${message}\n`);
 
 function ensureDir(file) {
   mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
@@ -36,10 +37,10 @@ export function defaultKeyFile(tokenFile) {
   return path.join(path.dirname(tokenFile), 'token.key');
 }
 
-function opts(defaults, extra) {
+function opts(extra) {
   return {
     require: extra?.require ?? process.env.WB_KEYRING === 'require',
-    onWarn: extra?.onWarn ?? defaults?.onWarn,
+    onWarn: extra?.onWarn ?? defaultWarn,
   };
 }
 
@@ -52,7 +53,14 @@ function readKey(keyFile, keyring, { require, onWarn }) {
     } catch {
       throw new Error(`key file ${keyFile} is not valid JSON`);
     }
+    // WB_KEYRING=require: an existing plain-file key must not be silently accepted.
+    if (require && blob?.scheme === 'file') {
+      throw new Error(`WB_KEYRING=require: ключ ${keyFile} хранится файлом (scheme=file), а не в системном keychain`);
+    }
     return keyring.unprotectKey(blob, { id: keyFile, require });
+  }
+  if (require) {
+    throw new Error(`WB_KEYRING=require: ключ ${keyFile} хранится файлом (legacy raw), а не в системном keychain`);
   }
   // Legacy key file: a raw base64 32-byte key from older versions.
   const key = Buffer.from(text, 'base64');
@@ -60,10 +68,10 @@ function readKey(keyFile, keyring, { require, onWarn }) {
   return key;
 }
 
-function writeKey(keyFile, key, keyring, { require }) {
+function writeKey(keyFile, key, keyring, { require, onWarn }) {
   const blob = keyring.protectKey(key, { id: keyFile, require });
   writeFileSync(keyFile, JSON.stringify({ v: 1, scheme: blob.scheme, data: blob.data }) + '\n', { mode: 0o600 });
-  restrict(keyFile);
+  restrict(keyFile, { onWarn });
 }
 
 // Best-effort upgrade of a legacy raw key or a `file`-scheme key to the system
@@ -81,7 +89,7 @@ function migrateKeyIfLegacy(keyFile, keyring, { require, onWarn }) {
       if (key.length !== 32) return;
     }
     const upgraded = keyring.protectKey(key, { id: keyFile, require: false });
-    if (upgraded.scheme !== 'file') writeKey(keyFile, key, keyring, { require });
+    if (upgraded.scheme !== 'file') writeKey(keyFile, key, keyring, { require, onWarn });
   } catch (err) {
     if (typeof onWarn === 'function') onWarn(`миграция защиты ключа ${keyFile} не удалась: ${err.message}`);
   }
@@ -102,7 +110,7 @@ export function keySchemeOf(keyFile) {
 export function saveTokenToFile(token, { file, keyFile = defaultKeyFile(file), keyring = defaultKeyring, ...extra } = {}) {
   if (!token || typeof token !== 'string') throw new Error('token must be a non-empty string');
   if (!file) throw new Error('token file path is required');
-  const { require, onWarn } = opts(extra, extra);
+  const { require, onWarn } = opts(extra);
   ensureDir(file);
   ensureDir(keyFile);
   let key;
@@ -110,7 +118,7 @@ export function saveTokenToFile(token, { file, keyFile = defaultKeyFile(file), k
     key = readKey(keyFile, keyring, { require, onWarn });
   } else {
     key = keyring.generateKey();
-    writeKey(keyFile, key, keyring, { require });
+    writeKey(keyFile, key, keyring, { require, onWarn });
   }
   const iv = randomBytes(12);
   const cipher = createCipheriv(ALG, key, iv);
@@ -127,7 +135,7 @@ export function loadTokenFromFile(file, { keyFile = defaultKeyFile(file), keyrin
   if (!file) throw new Error('token file path is required');
   if (!existsSync(file)) throw new Error(`token file not found: ${file}`);
   if (!existsSync(keyFile)) throw new Error(`token key not found: ${keyFile}`);
-  const { require, onWarn } = opts(extra, extra);
+  const { require, onWarn } = opts(extra);
   let payload;
   try {
     payload = JSON.parse(readFileSync(file, 'utf8'));

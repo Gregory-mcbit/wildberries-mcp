@@ -24,7 +24,7 @@
 //   node sync.mjs --module 02-items --module 05-dbs   # only these modules
 //   node sync.mjs --verbose
 
-import { mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile, rm, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseYaml } from './yaml.mjs';
@@ -659,12 +659,12 @@ export async function loadCatalogBundle(file) {
 }
 
 // Unpacks a bundle written by createCatalogBundle into a catalog directory.
+// The bundle is fully validated and written into a staging directory first, so a
+// malicious/corrupt bundle can never destroy the previous working catalog.
 export async function writeCatalogBundle(bundle, outDir) {
   if (!bundle?.index?.meta || !bundle?.modules) throw new Error('bundle is malformed: index/modules missing');
-  await rm(outDir, { recursive: true, force: true });
-  await mkdir(outDir, { recursive: true });
   const root = path.resolve(outDir);
-  const safePath = (key) => {
+  const safeName = (key) => {
     if (typeof key !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(key)) {
       throw new Error(`bundle: небезопасное имя модуля "${key}" (допустимы буквы/цифры/._- без слэшей)`);
     }
@@ -672,11 +672,23 @@ export async function writeCatalogBundle(bundle, outDir) {
     if (path.dirname(target) !== root) {
       throw new Error(`bundle: модуль "${key}" выходит за пределы каталога`);
     }
-    return target;
+    return `${key}.json`;
   };
-  await writeFile(path.join(root, 'index.json'), JSON.stringify(bundle.index));
-  for (const [key, module] of Object.entries(bundle.modules)) {
-    await writeFile(safePath(key), JSON.stringify(module));
+  // Validate every module name before touching anything on disk.
+  const entries = Object.entries(bundle.modules).map(([key, module]) => [safeName(key), module]);
+
+  const staging = path.join(path.dirname(root), `.${path.basename(root)}.tmp-${process.pid}-${Date.now()}`);
+  await mkdir(staging, { recursive: true });
+  try {
+    await writeFile(path.join(staging, 'index.json'), JSON.stringify(bundle.index));
+    for (const [file, module] of entries) {
+      await writeFile(path.join(staging, file), JSON.stringify(module));
+    }
+    await rm(root, { recursive: true, force: true });
+    await rename(staging, root);
+  } catch (err) {
+    await rm(staging, { recursive: true, force: true }).catch(() => {});
+    throw err;
   }
   return {
     modules: Object.keys(bundle.modules).length,

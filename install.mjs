@@ -25,9 +25,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildCatalog, loadCatalogBundle, writeCatalogBundle } from './sync.mjs';
 import { saveTokenToFile } from './tokenstore.mjs';
+import { accountFileId } from './accounts.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const FILES = ['server.mjs', 'sync.mjs', 'yaml.mjs', 'search.mjs', 'tokens.mjs', 'tokenstore.mjs', 'keyring.mjs', 'verify.mjs', 'doctor.mjs', 'package.json', 'README.md', 'AGENT-INSTALL.md', 'LICENSE'];
+const FILES = ['server.mjs', 'sync.mjs', 'yaml.mjs', 'search.mjs', 'tokens.mjs', 'tokenstore.mjs', 'keyring.mjs', 'accounts.mjs', 'verify.mjs', 'doctor.mjs', 'package.json', 'README.md', 'AGENT-INSTALL.md', 'LICENSE'];
 
 const argv = process.argv.slice(2);
 const has = (name) => argv.includes(name);
@@ -153,9 +154,10 @@ function accountsEnv() {
     return { error: true };
   }
   const files = {};
+  const used = new Set();
   for (const [name, token] of Object.entries(accounts)) {
-    const safe = String(name).replace(/[^\w.-]+/g, '_') || 'account';
-    const file = path.join(DATA_ROOT, 'accounts', `${safe}.enc`);
+    const id = accountFileId(name, used);
+    const file = path.join(DATA_ROOT, 'accounts', `${id}.enc`);
     const key = `${file}.key`;
     if (DRY_RUN) {
       console.log(`· аккаунт "${name}" будет сохранён зашифрованно: ${file}`);

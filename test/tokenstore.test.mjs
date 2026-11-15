@@ -103,6 +103,30 @@ async function main() {
       assert.equal(JSON.parse(await readFile(k, 'utf8')).scheme, 'dpapi', 'scheme=file повышен до системного keyring');
     });
 
+    await test('WB_KEYRING=require: файловый ключ не принимается', async () => {
+      const f = path.join(tmp, 'strict.enc');
+      const k = path.join(tmp, 'strict.key');
+      saveTokenToFile(TOKEN, { file: f, keyFile: k, keyring: fileKeyring });
+      assert.equal(JSON.parse(await readFile(k, 'utf8')).scheme, 'file');
+      assert.throws(
+        () => loadTokenFromFile(f, { keyFile: k, keyring: fileKeyring, require: true }),
+        /WB_KEYRING=require/,
+      );
+      // legacy raw-ключ тоже не принимается в строгом режиме
+      await writeFile(k, Buffer.from('0123456789abcdef0123456789abcdef', 'utf8').toString('base64'));
+      assert.throws(
+        () => loadTokenFromFile(f, { keyFile: k, keyring: fileKeyring, require: true }),
+        /WB_KEYRING=require/,
+      );
+    });
+
+    await test('WB_KEYRING=require: защищённый ключ принимается', async () => {
+      const f = path.join(tmp, 'strict2.enc');
+      const k = path.join(tmp, 'strict2.key');
+      saveTokenToFile(TOKEN, { file: f, keyFile: k, keyring: fakeKeyring });
+      assert.equal(loadTokenFromFile(f, { keyFile: k, keyring: fakeKeyring, require: true }), TOKEN);
+    });
+
     await test('множество аккаунтов через WB_TOKEN_FILES (шифрованные файлы)', async () => {
       const a1 = path.join(tmp, 'a1.enc');
       const k1 = `${a1}.key`;
