@@ -55,7 +55,7 @@ async function rewriteHosts(catalogDir, baseUrl) {
   }
 }
 
-async function startServer(env) {
+async function startServer(env, opts = {}) {
   const input = new PassThrough();
   const output = new PassThrough();
   const errors = [];
@@ -73,6 +73,18 @@ async function startServer(env) {
     try {
       msg = JSON.parse(line);
     } catch {
+      return;
+    }
+    // Server -> client request (sampling/createMessage): answer with a canned reply.
+    if (typeof msg.method === 'string' && msg.id !== undefined && msg.method === 'sampling/createMessage') {
+      const reply = typeof opts.samplingReply === 'function' ? opts.samplingReply(msg.params) : (opts.samplingReply ?? 'Отклонить');
+      input.write(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: msg.id,
+          result: { role: 'assistant', content: { type: 'text', text: reply }, model: 'test-model', stopReason: 'endTurn' },
+        }) + '\n',
+      );
       return;
     }
     if (msg.id === undefined) {
@@ -476,7 +488,7 @@ async function main() {
       }
     });
 
-    await test('wb_call: верный confirm выполняет запись, неверный — блокирует', async () => {
+    await test('wb_call: верный confirm выполняет запись, неверный и повторный — блокируют', async () => {
       const confirmServer = await startServer({ ...env, WB_MCP_CATALOG: writeCatalogDir, WB_CONFIRM_WRITES: '1' });
       try {
         const first = await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts' });
@@ -484,12 +496,56 @@ async function main() {
 
         const beforeWrong = mock.state.requests.length;
         const wrong = await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: 'wrong-id' });
-        assert.ok(wrong.text.includes('Требуется подтверждение'), 'неверный confirm отклонён');
+        assert.equal(wrong.isError, true, 'неверный confirm — ошибка');
+        assert.ok(wrong.text.includes('отклонено'), wrong.text);
         assert.equal(mock.state.requests.length, beforeWrong, 'неверный confirm не шлёт запрос');
 
         const before = mock.state.requests.length;
         await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: confirmId });
         assert.equal(mock.state.requests.length, before + 1, 'запрос выполнен после подтверждения');
+        assert.equal(mock.state.requests.at(-1).path, '/api/supplies/v1/drafts');
+
+        // Одноразовость: тот же confirm повторно не сработает.
+        const again = await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: confirmId });
+        assert.equal(again.isError, true, 'повторный confirm — ошибка');
+        assert.ok(again.text.includes('уже использован'), again.text);
+        assert.equal(mock.state.requests.length, before + 1, 'повторный confirm не шлёт запрос');
+      } finally {
+        await confirmServer.stop();
+      }
+    });
+
+    await test('wb_call: при sampling пользователь может отклонить запись', async () => {
+      const confirmServer = await startServer({ ...env, WB_MCP_CATALOG: writeCatalogDir, WB_CONFIRM_WRITES: '1' }, { samplingReply: 'Отклонить' });
+      try {
+        await confirmServer.rpc.request('initialize', {
+          protocolVersion: '2025-06-18',
+          capabilities: { sampling: {} },
+          clientInfo: { name: 't', version: '1' },
+        });
+        const first = await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts' });
+        const before = mock.state.requests.length;
+        const denied = await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: first.structuredContent.confirmId });
+        assert.equal(denied.isError, true, 'отклонение пользователем — ошибка');
+        assert.ok(denied.text.includes('отклонил'), denied.text);
+        assert.equal(mock.state.requests.length, before, 'запрос не выполнен после отказа');
+      } finally {
+        await confirmServer.stop();
+      }
+    });
+
+    await test('wb_call: при sampling пользователь может разрешить запись', async () => {
+      const confirmServer = await startServer({ ...env, WB_MCP_CATALOG: writeCatalogDir, WB_CONFIRM_WRITES: '1' }, { samplingReply: 'Разрешить' });
+      try {
+        await confirmServer.rpc.request('initialize', {
+          protocolVersion: '2025-06-18',
+          capabilities: { sampling: {} },
+          clientInfo: { name: 't', version: '1' },
+        });
+        const first = await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts' });
+        const before = mock.state.requests.length;
+        await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: first.structuredContent.confirmId });
+        assert.equal(mock.state.requests.length, before + 1, 'запрос выполнен после согласия (sampling)');
         assert.equal(mock.state.requests.at(-1).path, '/api/supplies/v1/drafts');
       } finally {
         await confirmServer.stop();
@@ -563,8 +619,18 @@ async function main() {
       assert.equal(mock.state.requests.length, before, 'запрос не выполнен');
     });
 
-    await test('wb_call: multipart-загрузка файла выполняется', async () => {
-      const upDir = path.join(tmp, 'catalog-upload');
+    await test('wb_request: изменяющий POST не повторяется после 5xx', async () => {
+      const { text, isError } = await rpc.tool('wb_request', {
+        method: 'POST',
+        url: `${mock.baseUrl}/api/v1/flaky-write`,
+        body: { x: 1 },
+      });
+      assert.equal(isError, true, '5xx на запись — ошибка');
+      assert.ok(text.includes('проверь состояние'), text);
+      assert.equal(mock.state.flakyCalls, 1, 'POST не повторяется вслепую после 5xx');
+    });
+
+    await test('wb_call: multipart-загрузка файла выполняется', async () => {      const upDir = path.join(tmp, 'catalog-upload');
       await mkdir(upDir, { recursive: true });
       const uploadFile = path.join(tmp, 'sample.txt');
       await writeFile(uploadFile, 'hello wb upload');

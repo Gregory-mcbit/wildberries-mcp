@@ -663,9 +663,20 @@ export async function writeCatalogBundle(bundle, outDir) {
   if (!bundle?.index?.meta || !bundle?.modules) throw new Error('bundle is malformed: index/modules missing');
   await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
-  await writeFile(path.join(outDir, 'index.json'), JSON.stringify(bundle.index));
+  const root = path.resolve(outDir);
+  const safePath = (key) => {
+    if (typeof key !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(key)) {
+      throw new Error(`bundle: небезопасное имя модуля "${key}" (допустимы буквы/цифры/._- без слэшей)`);
+    }
+    const target = path.resolve(root, `${key}.json`);
+    if (path.dirname(target) !== root) {
+      throw new Error(`bundle: модуль "${key}" выходит за пределы каталога`);
+    }
+    return target;
+  };
+  await writeFile(path.join(root, 'index.json'), JSON.stringify(bundle.index));
   for (const [key, module] of Object.entries(bundle.modules)) {
-    await writeFile(path.join(outDir, `${key}.json`), JSON.stringify(module));
+    await writeFile(safePath(key), JSON.stringify(module));
   }
   return {
     modules: Object.keys(bundle.modules).length,

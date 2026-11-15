@@ -55,6 +55,7 @@ const DATA_ROOT = process.env.WB_MCP_HOME || CONFIG_ROOT || path.join(os.homedir
 const APP_DIR = path.join(DATA_ROOT, 'app');
 
 const TOKEN = get('--token') ?? process.env.WB_API_TOKEN ?? null;
+const ACCOUNTS_RAW = get('--accounts') ?? null;
 const NODE_BIN = process.execPath;
 
 function home(...parts) {
@@ -126,7 +127,53 @@ function serverEntry(extraEnv) {
 
 // Stores the WB token encrypted (AES-256-GCM) and returns the env block for the
 // client config: clients get only the path to the encrypted file, not the token.
+// With --accounts, stores each token in its own encrypted file and returns
+// WB_TOKEN_FILES (JSON) — so multi-store is encrypted too, not plaintext in env.
+function parseAccounts(raw) {
+  if (!raw) return null;
+  const parsed = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('ожидается JSON-объект вида {"имя":"токен", ...}');
+  }
+  const out = {};
+  for (const [name, token] of Object.entries(parsed)) {
+    if (typeof token !== 'string' || !token.trim()) throw new Error(`пустой токен для аккаунта "${name}"`);
+    out[name] = token.trim();
+  }
+  if (!Object.keys(out).length) throw new Error('нет ни одного аккаунта');
+  return out;
+}
+
+function accountsEnv() {
+  let accounts;
+  try {
+    accounts = parseAccounts(ACCOUNTS_RAW);
+  } catch (err) {
+    console.error(`! --accounts: ${err.message}`);
+    return { error: true };
+  }
+  const files = {};
+  for (const [name, token] of Object.entries(accounts)) {
+    const safe = String(name).replace(/[^\w.-]+/g, '_') || 'account';
+    const file = path.join(DATA_ROOT, 'accounts', `${safe}.enc`);
+    const key = `${file}.key`;
+    if (DRY_RUN) {
+      console.log(`· аккаунт "${name}" будет сохранён зашифрованно: ${file}`);
+    } else {
+      saveTokenToFile(token, { file, keyFile: key });
+      console.log(`· аккаунт "${name}" сохранён зашифрованно: ${file} (ключ: ${key})`);
+    }
+    files[name] = { file, key };
+  }
+  return { env: { WB_TOKEN_FILES: JSON.stringify(files) } };
+}
+
 function prepareTokenEnv() {
+  if (ACCOUNTS_RAW) {
+    const result = accountsEnv();
+    if (result.error) return null;
+    return result.env;
+  }
   const tokenFile = path.join(DATA_ROOT, 'token.enc');
   const keyFile = path.join(DATA_ROOT, 'token.key');
   if (TOKEN && !PLAIN_TOKEN) {
@@ -331,6 +378,7 @@ async function main() {
   if (copy.copied) console.log(`· файлы сервера ${DRY_RUN ? 'будут скопированы' : 'скопированы'} в ${APP_DIR}`);
 
   const tokenEnv = prepareTokenEnv();
+  if (tokenEnv === null) return { code: 1 };
 
   let sync;
   if (DRY_RUN) {
@@ -361,10 +409,12 @@ async function main() {
 
   const entry = serverEntry(tokenEnv);
   const results = [];
+  const failures = [];
   for (const key of chosen) {
     const target = TARGETS[key];
     if (!target) {
       console.log(`! неизвестный клиент "${key}" (доступны: ${Object.keys(TARGETS).join(', ')})`);
+      failures.push(key);
       continue;
     }
     try {
@@ -374,8 +424,15 @@ async function main() {
       if (res.existed) console.log(`  существующий конфиг ${DRY_RUN ? 'будет ' : ''}сохранён в бэкап${res.backup ? `: ${res.backup}` : ''}`);
       console.log(`  ${target.doc}`);
     } catch (err) {
+      failures.push(key);
       console.log(`! ${target.title}: ${err.message}`);
     }
+  }
+
+  if (failures.length) {
+    console.log(`\nВНИМАНИЕ: не удалось записать конфиг для клиентов: ${failures.join(', ')}.`);
+    console.log('Проверь права на файлы/папки конфигов и повтори установку.');
+    return { code: 1 };
   }
 
   console.log('\nГотово. Что дальше:');

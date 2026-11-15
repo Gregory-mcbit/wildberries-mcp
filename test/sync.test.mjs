@@ -3,9 +3,10 @@
 
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildCatalog } from '../sync.mjs';
+import { buildCatalog, writeCatalogBundle } from '../sync.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -157,6 +158,18 @@ async function main() {
     const a = JSON.parse(await readFile(path.join(tmp, 'out-a', 'index.json'), 'utf8'));
     const b = JSON.parse(await readFile(path.join(tmp, 'out-b', 'index.json'), 'utf8'));
     assert.deepEqual(a.operations.map((o) => o.id), b.operations.map((o) => o.id));
+  });
+
+  await test('writeCatalogBundle: имя модуля с выходом из папки отклоняется', async () => {
+    const out = path.join(tmp, 'bundle-out');
+    await mkdir(out, { recursive: true });
+    const bundle = {
+      index: { meta: { modules: ['evil'], totalOps: 0 }, operations: [] },
+      modules: { '../escaped': { moduleKey: 'x', operations: [] } },
+    };
+    await assert.rejects(() => writeCatalogBundle(bundle, out), /небезопасное имя|выходит за пределы/);
+    const escaped = path.join(tmp, 'escaped.json');
+    assert.ok(!existsSync(escaped), 'файл вне каталога не создан');
   });
 
   await rm(tmp, { recursive: true, force: true });

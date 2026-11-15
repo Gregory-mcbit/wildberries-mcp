@@ -69,6 +69,26 @@ export function loadTokenAccounts(env = process.env) {
   if (env.WB_TOKEN_KEY && !env.WB_TOKEN_FILE) {
     errors.push('WB_TOKEN_KEY задан без WB_TOKEN_FILE — игнорирую');
   }
+  if (env.WB_TOKEN_FILES) {
+    try {
+      const map = JSON.parse(env.WB_TOKEN_FILES);
+      for (const [name, spec] of Object.entries(map)) {
+        const file = typeof spec === 'string' ? spec : spec?.file;
+        if (!file) {
+          errors.push(`WB_TOKEN_FILES: у аккаунта "${name}" нет file`);
+          continue;
+        }
+        const keyFile = typeof spec === 'string' ? `${file}.key` : (spec.key ?? `${file}.key`);
+        try {
+          accounts.set(name, loadTokenFromFile(file, { keyFile }));
+        } catch (err) {
+          errors.push(`WB_TOKEN_FILES (${name}): ${err.message}`);
+        }
+      }
+    } catch {
+      errors.push('WB_TOKEN_FILES не является валидным JSON — игнорирую');
+    }
+  }
   const raw = env.WB_ACCOUNTS;
   if (raw) {
     try {

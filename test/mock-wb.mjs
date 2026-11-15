@@ -83,6 +83,11 @@ export function startMock() {
       if (req.method === 'POST' && url.pathname === '/api/v1/upload') {
         return json(200, { contentType: req.headers['content-type'] ?? '', body });
       }
+      if (req.method === 'POST' && url.pathname === '/api/v1/flaky-write') {
+        state.flakyCalls = (state.flakyCalls || 0) + 1;
+        if (state.flakyCalls === 1) return json(500, { title: 'Internal Server Error', detail: 'boom' });
+        return json(200, { ok: true });
+      }
       return json(404, { title: 'not found', detail: `no mock route for ${req.method} ${url.pathname}` });
     });
   });

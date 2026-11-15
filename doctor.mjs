@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describeToken, loadTokenAccounts } from './tokens.mjs';
+import { keySchemeOf, defaultKeyFile } from './tokenstore.mjs';
 import { verifyCatalog } from './verify.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -135,6 +136,20 @@ function checkToken(env) {
   const detail = rows
     .map((r) => `${r.name}: ${r.valid ? 'ок' : 'невалиден'} · ${r.type ?? '?'} · категорий ${r.categories?.length ?? 0} · ${r.readOnly ? 'только чтение' : 'чтение/запись'} · до ${r.expiresAt ?? '?'}`)
     .join('; ');
+  // Фактический способ хранения ключа шифрования (dpapi/keychain/libsecret/file/raw).
+  const keyStorage = [];
+  if (env.WB_TOKEN_FILE) keyStorage.push(`ключ ${keySchemeOf(env.WB_TOKEN_KEY ?? defaultKeyFile(env.WB_TOKEN_FILE))}`);
+  if (env.WB_TOKEN_FILES) {
+    try {
+      for (const [name, spec] of Object.entries(JSON.parse(env.WB_TOKEN_FILES))) {
+        const file = typeof spec === 'string' ? spec : spec?.file;
+        if (file) keyStorage.push(`${name}: ключ ${keySchemeOf(typeof spec === 'string' ? `${file}.key` : spec.key ?? `${file}.key`)}`);
+      }
+    } catch {
+      // WB_TOKEN_FILES уже сообщил об ошибке через loadTokenAccounts
+    }
+  }
+  if (keyStorage.length) detail += ` · ${keyStorage.join(', ')}`;
   return { id: 'token', title: 'Токен WB', status, detail, accounts: rows, firstExpiresInDays: first?.expiresInDays };
 }
 

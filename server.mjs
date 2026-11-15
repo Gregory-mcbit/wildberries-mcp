@@ -14,7 +14,7 @@
 
 import { createInterface } from 'node:readline';
 import { readFile, mkdir, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,7 @@ import { describeToken, loadTokenAccounts } from './tokens.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export const NAME = 'wb-mcp';
-export const VERSION = '0.1.3';
+export const VERSION = '0.1.4';
 export const SUPPORTED_VERSIONS = ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const LEGACY_DEFAULT_VERSION = '2025-06-18';
 
@@ -656,6 +656,73 @@ export function createMcpServer({ env = process.env, input, output, error = proc
   const catalog = new Catalog(config.catalogDir);
   const limiter = new RateLimiter({ maxWaitMs: config.maxWaitMs, disabled: config.rateLimitDisabled });
 
+  // Client capabilities (sampling etc.), reported in `initialize`.
+  let clientCapabilities = {};
+  // One-time, expiring, operation-bound approvals for mutating calls.
+  const pendingApprovals = new Map();
+  const APPROVAL_TTL_MS = 300_000;
+  // Outbound requests to the client (sampling/createMessage) and their responses.
+  let nextOutboundId = 0;
+  const pendingOutbound = new Map();
+
+  function approvalFingerprint({ method, url, params, body, token }) {
+    return createHash('sha256')
+      .update([method, url, stableStringify(params ?? null), stableStringify(body ?? null), String(token ?? '')].join('\n'))
+      .digest('hex');
+  }
+
+  function issueApproval(fingerprint) {
+    for (const [id, rec] of pendingApprovals) if (rec.expiresAt < Date.now()) pendingApprovals.delete(id);
+    const confirmId = randomBytes(16).toString('hex');
+    pendingApprovals.set(confirmId, { fingerprint, expiresAt: Date.now() + APPROVAL_TTL_MS, used: false });
+    return confirmId;
+  }
+
+  function consumeApproval(confirmId, fingerprint) {
+    const rec = pendingApprovals.get(String(confirmId));
+    if (!rec) return { ok: false, reason: 'код неизвестен или истёк' };
+    if (rec.expiresAt < Date.now()) {
+      pendingApprovals.delete(String(confirmId));
+      return { ok: false, reason: 'код истёк (срок действия 5 минут)' };
+    }
+    if (rec.used) return { ok: false, reason: 'код уже использован (одноразовый)' };
+    if (rec.fingerprint !== fingerprint) return { ok: false, reason: 'код не соответствует этой операции' };
+    rec.used = true;
+    return { ok: true, rec };
+  }
+
+  function requestFromClient(method, params, timeoutMs = 30_000) {
+    const id = `wb-srv-${++nextOutboundId}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pendingOutbound.delete(id);
+        reject(new Error(`клиент не ответил на ${method}`));
+      }, timeoutMs);
+      pendingOutbound.set(id, { resolve, reject, timer });
+      send({ jsonrpc: '2.0', id, method, params });
+    });
+  }
+
+  async function elicitApproval(summary) {
+    if (!clientCapabilities.sampling) return true; // нет доверенного канала — остаётся одноразовый nonce
+    try {
+      const result = await requestFromClient(
+        'sampling/createMessage',
+        {
+          messages: [{ role: 'user', content: { type: 'text', text: summary } }],
+          systemPrompt:
+            'Ты — контролёр операции записи в кабинет Wildberries. Ответь ровно одним словом: "Разрешить" или "Отклонить".',
+          maxTokens: 8,
+        },
+        config.httpTimeoutMs,
+      );
+      const text = String(result?.content?.text ?? '').trim().toLowerCase();
+      return /разрешить|approve|yes|да|подтверждаю/i.test(text);
+    } catch {
+      return false; // fail closed: без явного согласия не выполняем
+    }
+  }
+
   function pickAccount(name) {
     if (name) {
       if (!accounts.has(name)) {
@@ -738,13 +805,6 @@ export function createMcpServer({ env = process.env, input, output, error = proc
     return headers;
   }
 
-  function writeConfirmId({ method, url, params, body, token }) {
-    return createHash('sha256')
-      .update([method, url, stableStringify(params ?? null), stableStringify(body ?? null), String(token ?? '')].join('\n'))
-      .digest('hex')
-      .slice(0, 12);
-  }
-
   async function serializeBody(op, body) {
     if (body === undefined || body === null) {
       if (op.body?.required) {
@@ -816,7 +876,7 @@ export function createMcpServer({ env = process.env, input, output, error = proc
     return target;
   }
 
-  async function executeHttp({ url, method, headers, body, contentType, opId, onRetry }) {
+  async function executeHttp({ url, method, headers, body, contentType, opId, onRetry, mutating = false }) {
     const started = Date.now();
     const attempts = 3;
     let totalWaited = 0;
@@ -833,6 +893,13 @@ export function createMcpServer({ env = process.env, input, output, error = proc
         });
       } catch (err) {
         lastError = err;
+        // Изменяющие запросы не повторяем вслепую: ответ мог потеряться, а объект — создаться.
+        if (mutating) {
+          throw new ToolError(
+            `Сетевой сбой при ${method} ${url}: ${err.name === 'TimeoutError' ? 'таймаут' : err.message}. ` +
+              'Операция могла выполниться, а ответ потеряться — проверь состояние в WB, прежде чем повторять.',
+          );
+        }
         if (attempt < attempts) {
           const wait = 1000 * attempt;
           totalWaited += wait;
@@ -886,12 +953,20 @@ export function createMcpServer({ env = process.env, input, output, error = proc
             'не делай повторных запросов сразу — штраф продлевается.',
         );
       }
-      if (res.status >= 500 && res.status < 600 && attempt < attempts) {
-        const wait = 1000 * attempt;
-        totalWaited += wait;
-        if (typeof onRetry === 'function') onRetry({ attempt, waitMs: wait, reason: 'server-error' });
-        await new Promise((r) => setTimeout(r, wait));
-        continue;
+      if (res.status >= 500 && res.status < 600) {
+        if (mutating) {
+          throw new ToolError(
+            `WB вернул ${res.status} на ${method} ${url}. Операция могла выполниться, а ответ потерян — ` +
+              'проверь состояние в WB, не повторяй вслепую.',
+          );
+        }
+        if (attempt < attempts) {
+          const wait = 1000 * attempt;
+          totalWaited += wait;
+          if (typeof onRetry === 'function') onRetry({ attempt, waitMs: wait, reason: 'server-error' });
+          await new Promise((r) => setTimeout(r, wait));
+          continue;
+        }
       }
       return { res, elapsedMs: Date.now() - started };
     }
@@ -1006,28 +1081,42 @@ export function createMcpServer({ env = process.env, input, output, error = proc
     assertAllowedUrl(url.toString());
 
     // Обязательное подтверждение изменяющих методов: первый вызов не шлёт запрос,
-    // а возвращает id подтверждения; реальный запрос — только с совпавшим confirm.
+    // а возвращает одноразовый id подтверждения; реальный запрос — только с совпавшим
+    // (и не использованным) id, а при наличии sampling — с явным согласием человека.
     if (!op.readonly && config.confirmWrites) {
-      const confirmId = writeConfirmId({ method: op.method, url: url.toString(), params, body: args.body, token: account.token });
-      if (args.confirm !== confirmId) {
+      const fingerprint = approvalFingerprint({ method: op.method, url: url.toString(), params, body: args.body, token: account.token });
+      if (!args.confirm) {
+        const confirmId = issueApproval(fingerprint);
         return {
           text: [
             `⚠ Требуется подтверждение: ${op.method} ${url.pathname} ИЗМЕНИТ данные магазина.`,
             `params: ${JSON.stringify(params)}`,
             ...(args.body !== undefined ? [`body: ${JSON.stringify(args.body)}`] : []),
             '',
-            `Повтори вызов wb_call с "confirm": "${confirmId}" — это явное согласие на изменение.`,
+            `Повтори вызов wb_call с "confirm": "${confirmId}" (код одноразовый, действует 5 минут).`,
             'Отключить подтверждение (осознанный риск): env WB_CONFIRM_WRITES=0.',
           ].join('\n'),
           structured: {
             approvalRequired: true,
             confirmId,
+            expiresInSec: APPROVAL_TTL_MS / 1000,
             method: op.method,
             path: url.pathname,
             params,
             body: args.body ?? null,
           },
         };
+      }
+      const check = consumeApproval(args.confirm, fingerprint);
+      if (!check.ok) throw new ToolError(`Подтверждение отклонено: ${check.reason}. Запусти операцию заново.`);
+      const approved = await elicitApproval(
+        `Разрешить изменение кабинета Wildberries?\n\n${op.method} ${url.pathname}\nparams: ${JSON.stringify(params)}\n` +
+          (args.body !== undefined ? `body: ${JSON.stringify(args.body)}` : '') +
+          '\n\nОтветь "Разрешить", чтобы выполнить, или "Отклонить", чтобы отменить.',
+      );
+      if (!approved) {
+        pendingApprovals.delete(String(args.confirm));
+        throw new ToolError('Пользователь отклонил изменение — операция не выполнена.');
       }
     }
 
@@ -1041,6 +1130,7 @@ export function createMcpServer({ env = process.env, input, output, error = proc
       body: bodyInfo?.body,
       contentType: bodyInfo?.contentType,
       opId: op.id,
+      mutating: !op.readonly,
       onRetry: ({ attempt, waitMs, reason }) =>
         progress?.(0.5, 1, `повтор ${attempt} (${reason}): ожидание ${Math.round(waitMs / 1000)} с`),
     });
@@ -1312,18 +1402,30 @@ export function createMcpServer({ env = process.env, input, output, error = proc
         );
       }
       if (config.confirmWrites) {
-        const confirmId = writeConfirmId({ method, url: url.toString(), params: args.query ?? null, body: args.body ?? null, token: account.token });
-        if (args.confirm !== confirmId) {
+        const fingerprint = approvalFingerprint({ method, url: url.toString(), params: args.query ?? null, body: args.body ?? null, token: account.token });
+        if (!args.confirm) {
+          const confirmId = issueApproval(fingerprint);
           return {
             text: [
               `⚠ Требуется подтверждение: ${method} ${url.pathname} ИЗМЕНИТ данные магазина.`,
               ...(args.body !== undefined ? [`body: ${typeof args.body === 'string' ? args.body : JSON.stringify(args.body)}`] : []),
               '',
-              `Повтори вызов wb_request с "confirm": "${confirmId}".`,
+              `Повтори вызов wb_request с "confirm": "${confirmId}" (код одноразовый, действует 5 минут).`,
               'Отключить подтверждение (осознанный риск): env WB_CONFIRM_WRITES=0.',
             ].join('\n'),
-            structured: { approvalRequired: true, confirmId, method, path: url.pathname },
+            structured: { approvalRequired: true, confirmId, expiresInSec: APPROVAL_TTL_MS / 1000, method, path: url.pathname },
           };
+        }
+        const check = consumeApproval(args.confirm, fingerprint);
+        if (!check.ok) throw new ToolError(`Подтверждение отклонено: ${check.reason}. Запусти операцию заново.`);
+        const approved = await elicitApproval(
+          `Разрешить изменение кабинета Wildberries?\n\n${method} ${url.pathname}` +
+            (args.body !== undefined ? `\nbody: ${typeof args.body === 'string' ? args.body : JSON.stringify(args.body)}` : '') +
+            '\n\nОтветь "Разрешить", чтобы выполнить, или "Отклонить", чтобы отменить.',
+        );
+        if (!approved) {
+          pendingApprovals.delete(String(args.confirm));
+          throw new ToolError('Пользователь отклонил изменение — операция не выполнена.');
         }
       }
     }
@@ -1343,6 +1445,7 @@ export function createMcpServer({ env = process.env, input, output, error = proc
       body,
       contentType: body ? 'application/json' : undefined,
       opId: 'raw',
+      mutating: !['GET', 'HEAD', 'OPTIONS'].includes(method),
     });
     const payload = await readResponse(res);
     if (!res.ok) throw new ToolError(wbErrorMessage(res, payload), { status: res.status });
@@ -1497,6 +1600,7 @@ export function createMcpServer({ env = process.env, input, output, error = proc
     if (method === 'initialize') {
       const requested = params?.protocolVersion;
       const version = SUPPORTED_VERSIONS.includes(requested) ? requested : LEGACY_DEFAULT_VERSION;
+      clientCapabilities = params?.capabilities ?? {};
       return {
         jsonrpc: '2.0',
         id,
@@ -1618,6 +1722,14 @@ export function createMcpServer({ env = process.env, input, output, error = proc
       send({ jsonrpc: '2.0', id: msg?.id ?? null, error: { code: -32600, message: 'Invalid Request: ожидается JSON-RPC 2.0' } });
       return;
     }
+    if (msg.id !== undefined && pendingOutbound.has(msg.id)) {
+      const pending = pendingOutbound.get(msg.id);
+      clearTimeout(pending.timer);
+      pendingOutbound.delete(msg.id);
+      if (msg.error) pending.reject(Object.assign(new Error(msg.error.message), { rpcError: msg.error }));
+      else pending.resolve(msg.result);
+      return;
+    }
     if (typeof msg.method === 'string' && msg.id === undefined) {
       // notifications (initialized/cancelled/...): no response
       return;
@@ -1632,7 +1744,13 @@ export function createMcpServer({ env = process.env, input, output, error = proc
   }
 
   let rl = null;
-  let chain = Promise.resolve();
+  const inflight = new Set();
+
+  function handleLineSafe(line) {
+    const task = handleLine(line).catch((err) => log(`line handler error: ${err?.message ?? err}`));
+    inflight.add(task);
+    task.finally(() => inflight.delete(task));
+  }
 
   return {
     config,
@@ -1663,21 +1781,22 @@ export function createMcpServer({ env = process.env, input, output, error = proc
         if (missing.length) log(`ВНИМАНИЕ: каталог неполный, нет модулей: ${missing.map((m) => m.key).join(', ')}`);
       } else log(catalog.error);
       rl = createInterface({ input, crlfDelay: Infinity, terminal: false });
-      rl.on('line', (line) => {
-        chain = chain.then(() => handleLine(line)).catch((err) => log(`line handler error: ${err?.message ?? err}`));
-      });
+      // Handle each line independently (not via a serial chain), so an outbound
+      // request such as sampling/createMessage can be answered while a tool call
+      // is still awaiting it.
+      rl.on('line', (line) => handleLineSafe(line));
       rl.on('close', () => {
-        chain.finally(() => {
-          if (typeof input.destroy === 'function') input.destroy();
-        });
+        if (typeof input.destroy === 'function') input.destroy();
       });
     },
     async stop() {
       if (rl) rl.close();
-      await chain;
+      await this.whenIdle();
     },
     async whenIdle() {
-      await chain;
+      while (inflight.size) {
+        await Promise.allSettled([...inflight]);
+      }
     },
   };
 }

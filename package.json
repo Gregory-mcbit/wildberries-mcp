@@ -1,7 +1,7 @@
 {
   "name": "wildberries-seller-mcp",
-  "version": "0.1.3",
-  "description": "MCP server for the full Wildberries Seller API: all official OpenAPI methods, zero dependencies, no VPS needed",
+  "version": "0.1.4",
+  "description": "Wildberries Seller API for AI assistants: catalog from official OpenAPI specs, local MCP server, zero dependencies",
   "type": "module",
   "bin": {
     "wb-mcp": "./server.mjs",

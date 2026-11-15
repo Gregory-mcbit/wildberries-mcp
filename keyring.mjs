@@ -37,7 +37,7 @@ function run(bin, args, { input } = {}) {
   return { ok: true, stdout: (result.stdout || '').trim() };
 }
 
-export function protectKey(key, { id, warn = console.error } = {}) {
+export function protectKey(key, { id, require = false, warn = console.error } = {}) {
   const buf = Buffer.isBuffer(key) ? key : Buffer.from(key);
   if (buf.length !== 32) throw new Error('keyring: ключ должен быть 32 байта');
 
@@ -52,6 +52,7 @@ export function protectKey(key, { id, warn = console.error } = {}) {
     run('security', ['delete-generic-password', '-a', account, '-s', SERVICE]);
     const add = run('security', ['add-generic-password', '-U', '-a', account, '-s', SERVICE, '-w', buf.toString('base64')]);
     if (add.ok) return { scheme: 'keychain', data: account };
+    if (require) throw new Error(`keyring: Keychain недоступен (${add.err}), а WB_KEYRING=require запрещает файловый ключ`);
     warn(`keyring: Keychain недоступен (${add.err}) — ключ хранится в файле рядом с данными`);
     return { scheme: 'file', data: buf.toString('base64') };
   }
@@ -60,10 +61,12 @@ export function protectKey(key, { id, warn = console.error } = {}) {
     const account = accountFor(id);
     const store = run('secret-tool', ['store', '--label', SERVICE, 'service', SERVICE, 'account', account], { input: buf.toString('base64') });
     if (store.ok) return { scheme: 'libsecret', data: account };
+    if (require) throw new Error(`keyring: secret-tool (libsecret) недоступен (${store.err}), а WB_KEYRING=require запрещает файловый ключ`);
     warn(`keyring: secret-tool (libsecret) недоступен (${store.err}) — ключ хранится в файле рядом с данными`);
     return { scheme: 'file', data: buf.toString('base64') };
   }
 
+  if (require) throw new Error(`keyring: на платформе ${process.platform} нет системного keychain, а WB_KEYRING=require запрещает файловый ключ`);
   warn(`keyring: платформа ${process.platform} не поддерживается — ключ хранится в файле рядом с данными`);
   return { scheme: 'file', data: buf.toString('base64') };
 }

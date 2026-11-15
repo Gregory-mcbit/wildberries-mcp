@@ -19,18 +19,18 @@ console.log(
 if (!info.valid) process.exit(1);
 
 const ua = { 'user-agent': 'wb-mcp-live-smoke', Authorization: token, Accept: 'application/json' };
+// Только статусы — тела ответов не печатаем и не сохраняем (в т.ч. в логи CI).
 const checks = [
-  ['ping (публичный)', 'https://common-api.wildberries.ru/ping', 200],
-  ['finance balance (авторизация)', 'https://finance-api.wildberries.ru/api/v1/account/balance', 200],
+  ['ping (публичный)', 'https://common-api.wildberries.ru/ping'],
+  ['finance balance (авторизация)', 'https://finance-api.wildberries.ru/api/v1/account/balance'],
 ];
 
 let failed = 0;
-for (const [name, url, expect] of checks) {
+for (const [name, url] of checks) {
   try {
     const res = await fetch(url, { headers: ua });
-    const text = (await res.text()).slice(0, 120).replace(/\n/g, ' ');
-    const ok = res.status === expect;
-    console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}: HTTP ${res.status} ${text}`);
+    const ok = res.status === 200;
+    console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}: HTTP ${res.status}`);
     if (!ok) failed++;
   } catch (err) {
     console.log(`FAIL ${name}: ${err.message}`);

@@ -86,6 +86,37 @@ async function main() {
       assert.equal(loadTokenFromFile(tokenFile, { keyFile, keyring: fakeKeyring }), TOKEN, 'после миграции читается');
     });
 
+    await test('key-файл scheme=file повышается до dpapi при чтении', async () => {
+      const upgradeKeyring = {
+        generateKey: () => Buffer.from('0123456789abcdef0123456789abcdef', 'utf8'),
+        protectKey: (k) => ({ scheme: 'dpapi', data: Buffer.concat([Buffer.from('DPAPI:'), k]).toString('base64') }),
+        unprotectKey: (blob) =>
+          blob.scheme === 'dpapi'
+            ? Buffer.from(Buffer.from(blob.data, 'base64').toString('utf8').slice('DPAPI:'.length), 'utf8')
+            : Buffer.from(blob.data, 'base64'),
+      };
+      const f = path.join(tmp, 'up.enc');
+      const k = path.join(tmp, 'up.key');
+      saveTokenToFile(TOKEN, { file: f, keyFile: k, keyring: fileKeyring });
+      assert.equal(JSON.parse(await readFile(k, 'utf8')).scheme, 'file');
+      assert.equal(loadTokenFromFile(f, { keyFile: k, keyring: upgradeKeyring }), TOKEN);
+      assert.equal(JSON.parse(await readFile(k, 'utf8')).scheme, 'dpapi', 'scheme=file повышен до системного keyring');
+    });
+
+    await test('множество аккаунтов через WB_TOKEN_FILES (шифрованные файлы)', async () => {
+      const a1 = path.join(tmp, 'a1.enc');
+      const k1 = `${a1}.key`;
+      const a2 = path.join(tmp, 'a2.enc');
+      const k2 = `${a2}.key`;
+      saveTokenToFile(TOKEN, { file: a1, keyFile: k1, keyring: fileKeyring });
+      saveTokenToFile(`${TOKEN}-2`, { file: a2, keyFile: k2, keyring: fileKeyring });
+      const env = { WB_TOKEN_FILES: JSON.stringify({ 'магазин1': a1, 'магазин2': { file: a2, key: k2 } }) };
+      const { accounts, errors } = loadTokenAccounts(env);
+      assert.deepEqual(errors, []);
+      assert.equal(accounts.get('магазин1'), TOKEN);
+      assert.equal(accounts.get('магазин2'), `${TOKEN}-2`);
+    });
+
     await test('подмена данных/чужой ключ не расшифровываются', async () => {
       const payload = JSON.parse(await readFile(tokenFile, 'utf8'));
       const tampered = { ...payload, data: Buffer.from('hacked').toString('base64') };
