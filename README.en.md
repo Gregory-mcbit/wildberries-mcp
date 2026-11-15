@@ -1,105 +1,108 @@
-# wb-mcp — Wildberries Seller API as a local MCP server
+# wb-mcp
 
-> **Your Wildberries Seller API inside an AI assistant.** Local by default: the client spawns the
-> server, and the token plus store data never leave your machine.
+**Wildberries Seller API inside your AI assistant.** Local by default: the client spawns the server,
+and the token plus store data never leave your machine.
 
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-85%20passing-brightgreen)](./test)
+[![npm](https://img.shields.io/npm/v/wb-mcp)](https://www.npmjs.com/package/wb-mcp)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
-
-```text
-Cursor / Claude / Codex / Gemini / VS Code
-        │  MCP over stdio (JSON-RPC)
-        ▼
-   server.mjs  ── HTTPS ──▶  *.wildberries.ru
-        │
-        └── catalog/ (built from official WB OpenAPI specs)
-```
 
 ## Highlights
 
-- 🎯 **Full Seller API coverage.** 13 official sections, **309 methods**, generated from the
-  official WB OpenAPI specs; `node verify.mjs` confirms 13/13 and no gaps.
-- 🪶 **Zero dependencies.** Node.js ≥ 20 plus our own code: auditable in an evening, no
+- 🎯 **Full Seller API coverage** — all **13 sections, 309 methods** generated from the official WB
+  OpenAPI specs; `node verify.mjs` confirms 13/13 and no gaps.
+- 🪶 **Zero dependencies** — Node.js ≥ 20 and our own code only: auditable in an evening, no
   supply-chain surface.
-- 🧠 **A real MCP server, not just tools.** Prompts with scenarios, Resources (`wb://…`),
-  structuredContent, progress notifications, catalog subscriptions.
-- 🔐 **Token under your control.** AES-256-GCM at rest (`~/.wb-mcp/token.enc`); client configs
-  contain only the file path; in `.mcpb` the token lives in Claude's secure storage. Requests go
-  only to `*.wildberries.ru`.
-- 🏠 **Local by default.** No VPS, ports or cloud; store data stays on your machine and request
-  bodies are never logged.
-- 📦 **Install for your client.** `.mcpb` one-click, Cursor/VS Code deeplinks, portable ZIP,
-  installer for 6 clients, `npx` without installing anything.
-- ⚡ **Careful with WB limits.** Token bucket from the official spec limits, 429 and **409 penalty**
-  handling, large responses saved to disk instead of context.
-- 🔄 **Fresh catalog.** Offline catalog shipped in the release, `wb_refresh` in one command,
-  `doctor` warns when the catalog gets stale.
-- 🩺 **Verifiable.** 85 offline tests against a mock WB API, CI on Windows/Linux, `doctor` and
-  `verify` built in.
+- 🔐 **Your token stays yours** — AES-256-GCM at rest, client configs reference the file path only;
+  requests go only to `*.wildberries.ru`, request bodies are never logged.
+- 🧠 **A complete MCP server** — tools plus prompts with scenarios, resources (`wb://…`),
+  structuredContent, progress notifications and catalog subscriptions.
+- ⚡ **Careful with WB limits** — token bucket from the spec limits, 429 and 409-penalty handling,
+  large responses saved to disk instead of model context.
+- 📦 **One-step install** — `.mcpb` double-click, Cursor/VS Code deeplinks, portable ZIP, installer
+  for 6 clients, `npx` without installing anything.
+- 🔄 **Fresh catalog** — offline bundle in GitHub Releases, `wb_refresh`, and `doctor` warnings when
+  the catalog gets stale.
+- ✅ **Verifiable** — 85 offline tests against a mock WB API, CI on Windows/Linux, `doctor` and `verify`.
 
 ## Install
 
+### 1. Get a WB API token
+
+Seller cabinet → **Settings → API integrations → Create token**.
+Start with **read-only** and only the scopes you need.
+
+### 2. Install into your client
+
 | Client | How |
 |---|---|
-| **Claude Desktop** | download `wb-mcp.mcpb` from Releases → double-click |
-| **Cursor** | [Install in Cursor](https://cursor.com/install-mcp?name=wb&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIi1wIiwiZ2l0aHViOkdyZWdvcnktbWNiaXQvd2lsZGJlcnJpZXMtbWNwIiwid2ItbWNwIl0sImVudiI6eyJXQl9BVVRPX1NZTkMiOiIxIiwiV0JfQVBJX1RPS0VOIjoiUEFTVEVfWU9VUl9XQl9BUElfVE9LRU4ifX0%3D) |
-| **VS Code** | [Install in VS Code](vscode:mcp/install?%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22-p%22%2C%22github%3AGregory-mcbit%2Fwildberries-mcp%22%2C%22wb-mcp%22%5D%2C%22env%22%3A%7B%22WB_AUTO_SYNC%22%3A%221%22%2C%22WB_API_TOKEN%22%3A%22PASTE_YOUR_WB_API_TOKEN%22%7D%7D) |
+| **Claude Desktop** | download `wb-mcp.mcpb` from Releases → double-click → paste the token |
+| **Cursor** | [Install in Cursor](https://cursor.com/install-mcp?name=wb&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIi1wIiwiZ2l0aHViOkdyZWdvcnktbWNiaXQvd2lsZGJlcnJpZXMtbWNwIiwid2ItbWNwIl0sImVudiI6eyJXQl9BVVRPX1NZTkMiOiIxIiwiV0JfQVBJX1RPS0VOIjoiUEFTVEVfWU9VUl9XQl9BUElfVE9LRU4ifX0%3D) → replace `PASTE_YOUR_WB_API_TOKEN` |
+| **VS Code** | [Install in VS Code](vscode:mcp/install?%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22-p%22%2C%22github%3AGregory-mcbit%2Fwildberries-mcp%22%2C%22wb-mcp%22%5D%2C%22env%22%3A%7B%22WB_AUTO_SYNC%22%3A%221%22%2C%22WB_API_TOKEN%22%3A%22PASTE_YOUR_WB_API_TOKEN%22%7D%7D) → replace `PASTE_YOUR_WB_API_TOKEN` |
 | **Claude Code** | `claude mcp add wb --env WB_API_TOKEN=<token> -- node <path>/server.mjs` |
 | **Codex CLI** | `codex mcp add wb --env WB_API_TOKEN=<token> -- node <path>/server.mjs` |
 | **Gemini CLI** | `gemini mcp add wb --env WB_API_TOKEN=<token> -- node <path>/server.mjs` |
-| **Portable ZIP** | `wb-mcp-portable.zip` from Releases → run `install.cmd` / `install.sh` |
-| **No install** | `WB_API_TOKEN=<token> WB_AUTO_SYNC=1 npx -y -p github:Gregory-mcbit/wildberries-mcp wb-mcp` |
+| **All clients at once** | `node install.mjs --client all --token <token>` |
+| **From npm** | `npx -y -p wb-mcp wb-mcp-install --client all --token <token>` |
+| **Portable ZIP** | `wb-mcp-portable.zip` from Releases → `install.cmd` / `install.sh` |
 
-The installer (`node install.mjs --client all --token <token>`) configures Cursor, Claude Desktop,
-Claude Code, Codex, Gemini CLI and VS Code, builds or downloads the offline catalog, and stores the
-token encrypted with AES-256-GCM. Client configs contain only `WB_TOKEN_FILE=...`, never the token.
+The installer downloads the offline catalog, stores the token **encrypted**
+(`~/.wb-mcp/token.enc`) and writes client configs containing only `WB_TOKEN_FILE`.
 
-## Tools (8 instead of 1000+)
+Flags: `--client cursor|claude|claude-code|codex|gemini|vscode|all`, `--no-release`,
+`--bundle <file>`, `--plain-token`.
 
-`wb_search`, `wb_describe`, `wb_get` (read-only), `wb_call` (writes), `wb_sections`,
+### 3. Restart the client and verify
+
+```
+"show WB API sections"          → wb_sections
+"check WB API connection"       → wb_get {"id":"getPing"}
+```
+
+```bash
+node ~/.wb-mcp/app/doctor.mjs
+```
+
+## What the agent gets
+
+**8 tools:** `wb_search`, `wb_describe`, `wb_get` (read), `wb_call` (write), `wb_sections`,
 `wb_token_info`, `wb_request`, `wb_refresh`.
 
-## Prompts (slash commands)
+**5 prompts:** `sales-accelerator` (full sales-growth audit), `diagnose-orders-drop`, `check-stock`,
+`reply-reviews`, `weekly-report`.
 
-`sales-accelerator` — full sales growth audit (funnel/CTR, content, SEO, pricing, ads, promos, stock,
-reviews) with a 7/30-day plan; plus `diagnose-orders-drop`, `check-stock`, `reply-reviews`,
-`weekly-report`.
+**Resources:** `wb://catalog/index`, `wb://sections/<key>`, `wb://method/<id>`.
 
-## Resources
-
-`wb://catalog/index`, `wb://sections/<key>`, `wb://method/<id>` with `resources/subscribe` and
-`notifications/resources/updated`; `structuredContent`, `notifications/progress`.
-
-## Diagnostics
+## Diagnostics and updates
 
 ```bash
 node doctor.mjs          # Node, catalog, token, network, client configs
 node doctor.mjs --json
+node verify.mjs          # catalog structure and coverage
+node sync.mjs            # rebuild the catalog from official specs
 ```
 
-## Environment
+From chat: `wb_refresh`.
 
-| Variable | Purpose |
-|---|---|
-| `WB_API_TOKEN` | WB API token (or use encrypted `WB_TOKEN_FILE`) |
-| `WB_TOKEN_FILE` | path to encrypted token (set by installer) |
-| `WB_TOKEN_KEY` | path to the encryption key |
-| `WB_READONLY` | `1` — block all write methods |
-| `WB_AUTO_SYNC` | `1` — build the catalog on start if missing (npx mode) |
-| `WB_MCP_CATALOG` | catalog directory |
-| `WB_MAX_OUTPUT` | max chars returned into the model context (default 80000) |
+## Security
+
+- Token is encrypted with AES-256-GCM; the key is a separate owner-only file.
+- Only `*.wildberries.ru` hosts are allowed; everything else is blocked before the request.
+- Reads and writes are split: `wb_get` is safe, `wb_call` is for changes.
+- The server sees the read-only bit in the JWT and blocks writes early; `WB_READONLY=1` is a hard mode.
 
 ## Development
 
 ```bash
-node test/yaml.test.mjs && node test/sync.test.mjs && node test/mcp.test.mjs \
-  && node test/publish.test.mjs && node test/package.test.mjs && node test/bundle.test.mjs \
-  && node test/doctor.test.mjs && node test/tokenstore.test.mjs && node test/mcpb.test.mjs
+node test/mcp.test.mjs      # MCP protocol + HTTP on a mock WB
+node test/yaml.test.mjs     # YAML parser on a real WB spec
+node test/sync.test.mjs     # catalog builder
+node test/package.test.mjs  # packaging invariant (zero deps)
 ```
 
-Tests run offline against a local mock of the WB API.
+See [AGENT-INSTALL.md](./AGENT-INSTALL.md) and [README.md](./README.md) (Russian).
 
 ## License
 

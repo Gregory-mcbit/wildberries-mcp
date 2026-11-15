@@ -71,7 +71,7 @@ export async function publishNpm({ dir = HERE, dryRun = false, otp, npmBinary = 
   if (otp) args.push('--otp', String(otp));
   const childEnv = { ...env };
   const token = env.NPM_TOKEN ?? env.NODE_AUTH_TOKEN;
-  if (token) childEnv.npm_config_//registry.npmjs.org/:_authToken = token;
+  if (token) childEnv['npm_config_//registry.npmjs.org/:_authToken'] = token;
 
   log(`· npm ${args.join(' ')}`);
   // npm is a .cmd shim on Windows, so run it through the platform shell.
