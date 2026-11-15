@@ -24,7 +24,7 @@ import { describeToken, loadTokenAccounts } from './tokens.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export const NAME = 'wb-mcp';
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.1';
 export const SUPPORTED_VERSIONS = ['2026-07-28', '2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 const LEGACY_DEFAULT_VERSION = '2025-06-18';
 
@@ -47,6 +47,20 @@ const INSTRUCTIONS = [
 function isWbHost(hostname) {
   const h = String(hostname).toLowerCase();
   return h === 'wildberries.ru' || h.endsWith('.wildberries.ru');
+}
+
+// Key-order independent JSON, so the write-confirmation id is stable across
+// re-sent (reordered) arguments.
+function stableStringify(value) {
+  if (value === null || value === undefined) return String(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function timestamp() {
@@ -265,9 +279,9 @@ export const TOOLS = [
     title: 'Wildberries API: вызов метода',
     description:
       'Вызвать ИЗМЕНЯЮЩИЙ метод Wildberries API по id (создание/обновление/удаление: цены, карточки, ' +
-      'заказы, поставки, реклама, ответы на отзывы). Перед вызовом предупреди пользователя о последствиях. ' +
-      'Для чтения используй wb_get — он не требует подтверждения. ' +
-      'Параметры path/query/header передавай в "params" по их именам из wb_describe, JSON-тело — в "body".',
+      'заказы, поставки, реклама, ответы на отзывы). Сервер блокирует запись, пока не передан параметр ' +
+      '"confirm" — id подтверждения, который возвращает первый вызов. Для чтения используй wb_get. ' +
+      'Параметры path/query/header передавай в "params", JSON-тело — в "body".',
     inputSchema: {
       type: 'object',
       properties: {
@@ -278,6 +292,10 @@ export const TOOLS = [
           additionalProperties: true,
         },
         body: { description: 'Тело запроса для POST/PUT/PATCH (JSON)' },
+        confirm: {
+          type: 'string',
+          description: 'Для изменяющих методов: id подтверждения, который сервер вернул в прошлом ответе. Без него запись блокируется.',
+        },
         account: { type: 'string', description: 'Имя аккаунта, если настроено несколько токенов' },
       },
       required: ['id'],
@@ -324,6 +342,10 @@ export const TOOLS = [
         query: { type: 'object', description: 'Query-параметры', additionalProperties: true },
         headers: { type: 'object', description: 'Дополнительные заголовки (Authorization игнорируется)', additionalProperties: true },
         body: { description: 'Тело запроса (JSON)' },
+        confirm: {
+          type: 'string',
+          description: 'Для изменяющих методов: id подтверждения из прошлого ответа сервера. Без него запись блокируется.',
+        },
         account: { type: 'string', description: 'Имя аккаунта' },
       },
       required: ['method'],
@@ -613,6 +635,10 @@ export function createMcpServer({ env = process.env, input, output, error = proc
     maxWaitMs: Number(env.WB_MAX_WAIT_MS ?? 120_000),
     httpTimeoutMs: Number(env.WB_HTTP_TIMEOUT_MS ?? 120_000),
     readOnlyMode: env.WB_READONLY === '1' || env.WB_READONLY === 'true',
+    // Обязательное подтверждение изменяющих запросов (wb_call/wb_request). Отключить: WB_CONFIRM_WRITES=0.
+    confirmWrites: env.WB_CONFIRM_WRITES !== '0' && env.WB_CONFIRM_WRITES !== 'false',
+    // Для хостов wildberries.ru разрешён только https://. Отключить (тесты): WB_ALLOW_HTTP=1.
+    allowHttp: env.WB_ALLOW_HTTP === '1',
     allowAnyHost: env.WB_ALLOW_ANY_HOST === '1',
     // WB_RATE_LIMIT=off — только для тестов/бенчмарков: отключает ожидание лимитов.
     rateLimitDisabled: env.WB_RATE_LIMIT === 'off' || env.WB_RATE_LIMIT === '0',
@@ -658,7 +684,14 @@ export function createMcpServer({ env = process.env, input, output, error = proc
       throw new ToolError(`Некорректный URL: ${url}`);
     }
     if (!/^https?:$/.test(parsed.protocol)) throw new ToolError('Разрешены только http/https');
-    if (!isWbHost(parsed.hostname) && !config.allowAnyHost) {
+    if (isWbHost(parsed.hostname)) {
+      if (parsed.protocol !== 'https:' && !config.allowHttp) {
+        throw new ToolError(
+          `Для хостов wildberries.ru разрешён только https:// (получено ${parsed.protocol}//${parsed.hostname}). ` +
+            'Токен не отправляется по открытому HTTP. Для локальных тестовых серверов — WB_ALLOW_ANY_HOST=1.',
+        );
+      }
+    } else if (!config.allowAnyHost) {
       throw new ToolError(
         `Хост ${parsed.hostname} не относится к wildberries.ru. ` +
           'Для своих тестовых серверов разреши явно: WB_ALLOW_ANY_HOST=1.',
@@ -705,7 +738,14 @@ export function createMcpServer({ env = process.env, input, output, error = proc
     return headers;
   }
 
-  function serializeBody(op, body) {
+  function writeConfirmId({ method, url, params, body, token }) {
+    return createHash('sha256')
+      .update([method, url, stableStringify(params ?? null), stableStringify(body ?? null), String(token ?? '')].join('\n'))
+      .digest('hex')
+      .slice(0, 12);
+  }
+
+  async function serializeBody(op, body) {
     if (body === undefined || body === null) {
       if (op.body?.required) {
         throw new ToolError(
@@ -730,10 +770,41 @@ export function createMcpServer({ env = process.env, input, output, error = proc
       };
     }
     if (op.body?.contentType?.includes('multipart')) {
-      throw new ToolError(
-        `Метод использует ${op.body.contentType}. Загрузка файлов через wb_call не поддерживается — ` +
-          'используй официальный портал или обычный HTTP-клиент.',
-      );
+      if (typeof payload !== 'object' || payload === null) {
+        throw new ToolError('Тело multipart должно быть объектом: поля по именам из wb_describe, файлы — как path или {path|content, filename}.');
+      }
+      const schemaProps = op.body?.schema?.properties ?? {};
+      const form = new FormData();
+      for (const [name, value] of Object.entries(payload)) {
+        if (value === undefined || value === null) continue;
+        const prop = schemaProps[name];
+        const isFile = prop && (prop.type === 'file' || prop.format === 'binary' || (prop.type === 'string' && prop.format === 'binary'));
+        if (isFile) {
+          let buffer;
+          let filename = name;
+          if (typeof value === 'string') {
+            buffer = await readFile(value);
+            filename = path.basename(value);
+          } else if (value && typeof value === 'object') {
+            if (value.path) {
+              buffer = await readFile(String(value.path));
+              filename = value.filename ?? path.basename(String(value.path));
+            } else if (value.content) {
+              buffer = Buffer.from(String(value.content), 'base64');
+              filename = value.filename ?? name;
+            } else {
+              throw new ToolError(`Файл "${name}": укажи path (путь к файлу) или content (base64).`);
+            }
+          } else {
+            throw new ToolError(`Файл "${name}": ожидается путь к файлу или {path|content, filename}.`);
+          }
+          form.append(name, new Blob([buffer]), filename);
+        } else {
+          form.append(name, typeof value === 'object' ? JSON.stringify(value) : String(value));
+        }
+      }
+      // fetch сам проставит content-type с boundary; не дублируем заголовок.
+      return { body: form, contentType: undefined };
     }
     return { body: JSON.stringify(payload), contentType: op.body?.contentType ?? 'application/json' };
   }
@@ -933,8 +1004,35 @@ export function createMcpServer({ env = process.env, input, output, error = proc
     progress?.(0.4, 1, `запрос к WB: ${op.method} ${op.path}`);
     const url = buildUrl(op, params);
     assertAllowedUrl(url.toString());
+
+    // Обязательное подтверждение изменяющих методов: первый вызов не шлёт запрос,
+    // а возвращает id подтверждения; реальный запрос — только с совпавшим confirm.
+    if (!op.readonly && config.confirmWrites) {
+      const confirmId = writeConfirmId({ method: op.method, url: url.toString(), params, body: args.body, token: account.token });
+      if (args.confirm !== confirmId) {
+        return {
+          text: [
+            `⚠ Требуется подтверждение: ${op.method} ${url.pathname} ИЗМЕНИТ данные магазина.`,
+            `params: ${JSON.stringify(params)}`,
+            ...(args.body !== undefined ? [`body: ${JSON.stringify(args.body)}`] : []),
+            '',
+            `Повтори вызов wb_call с "confirm": "${confirmId}" — это явное согласие на изменение.`,
+            'Отключить подтверждение (осознанный риск): env WB_CONFIRM_WRITES=0.',
+          ].join('\n'),
+          structured: {
+            approvalRequired: true,
+            confirmId,
+            method: op.method,
+            path: url.pathname,
+            params,
+            body: args.body ?? null,
+          },
+        };
+      }
+    }
+
     const headers = requestHeaders(op, params, account.token);
-    const bodyInfo = serializeBody(op, args.body);
+    const bodyInfo = await serializeBody(op, args.body);
 
     const { res, elapsedMs } = await executeHttp({
       url: url.toString(),
@@ -1199,6 +1297,37 @@ export function createMcpServer({ env = process.env, input, output, error = proc
         else url.searchParams.set(key, String(value));
       }
     }
+
+    // Сырой запрос подчиняется тем же защитам, что и вызов по каталогу.
+    const mutating = !['GET', 'HEAD', 'OPTIONS'].includes(method);
+    if (mutating) {
+      const tokenInfo = describeToken(account.token);
+      if (config.readOnlyMode) {
+        throw new ToolError(`Режим WB_READONLY=1: ${method} изменяет данные и заблокирован (в т.ч. сырой wb_request).`);
+      }
+      if (tokenInfo.readOnly) {
+        throw new ToolError(
+          `Токен аккаунта "${account.name}" создан в режиме «Только чтение», поэтому ${method} через wb_request заблокирован. ` +
+            'Создай токен «Чтение и запись» или используй read-only методы.',
+        );
+      }
+      if (config.confirmWrites) {
+        const confirmId = writeConfirmId({ method, url: url.toString(), params: args.query ?? null, body: args.body ?? null, token: account.token });
+        if (args.confirm !== confirmId) {
+          return {
+            text: [
+              `⚠ Требуется подтверждение: ${method} ${url.pathname} ИЗМЕНИТ данные магазина.`,
+              ...(args.body !== undefined ? [`body: ${typeof args.body === 'string' ? args.body : JSON.stringify(args.body)}`] : []),
+              '',
+              `Повтори вызов wb_request с "confirm": "${confirmId}".`,
+              'Отключить подтверждение (осознанный риск): env WB_CONFIRM_WRITES=0.',
+            ].join('\n'),
+            structured: { approvalRequired: true, confirmId, method, path: url.pathname },
+          };
+        }
+      }
+    }
+
     const headers = { Authorization: account.token, Accept: 'application/json' };
     if (args.headers && typeof args.headers === 'object') {
       for (const [key, value] of Object.entries(args.headers)) {

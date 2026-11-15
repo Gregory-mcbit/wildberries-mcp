@@ -142,6 +142,7 @@ async function main() {
       WB_MCP_CATALOG: catalogDir,
       WB_MCP_HOME: home,
       WB_ALLOW_ANY_HOST: '1',
+      WB_CONFIRM_WRITES: '0',
       WB_MAX_OUTPUT: '1500',
       WB_MAX_WAIT_MS: '5000',
       WB_RATE_LIMIT: 'off',
@@ -449,6 +450,165 @@ async function main() {
 
     await test('неизвестный JSON-RPC метод даёт -32601', async () => {
       await assert.rejects(() => rpc.request('foo/bar', {}), (err) => err.rpcError?.code === -32601);
+    });
+
+    // -- защита записи: подтверждение, read-only для сырого запроса, https, multipart --
+
+    const writeCatalogDir = path.join(tmp, 'catalog-writes');
+    await buildCatalog({ fromDir: sampleDir, outDir: writeCatalogDir, verbose: false });
+    await rewriteHosts(writeCatalogDir, mock.baseUrl);
+    const writeIndex = JSON.parse(await readFile(path.join(writeCatalogDir, 'index.json'), 'utf8'));
+    const writeOp = writeIndex.operations.find((op) => op.id === 'postV1Drafts');
+    assert.ok(writeOp && writeOp.readonly === false, 'postV1Drafts — изменяющий метод');
+
+    await test('wb_call: запись без confirm блокируется (запрос не уходит)', async () => {
+      const confirmServer = await startServer({ ...env, WB_MCP_CATALOG: writeCatalogDir, WB_CONFIRM_WRITES: '1' });
+      try {
+        const before = mock.state.requests.length;
+        const { text, isError, structuredContent } = await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts' });
+        assert.ok(!isError, text);
+        assert.equal(structuredContent.approvalRequired, true);
+        assert.ok(structuredContent.confirmId, 'выдан id подтверждения');
+        assert.ok(text.includes('Требуется подтверждение'), text);
+        assert.equal(mock.state.requests.length, before, 'запрос не ушёл без confirm');
+      } finally {
+        await confirmServer.stop();
+      }
+    });
+
+    await test('wb_call: верный confirm выполняет запись, неверный — блокирует', async () => {
+      const confirmServer = await startServer({ ...env, WB_MCP_CATALOG: writeCatalogDir, WB_CONFIRM_WRITES: '1' });
+      try {
+        const first = await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts' });
+        const confirmId = first.structuredContent.confirmId;
+
+        const beforeWrong = mock.state.requests.length;
+        const wrong = await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: 'wrong-id' });
+        assert.ok(wrong.text.includes('Требуется подтверждение'), 'неверный confirm отклонён');
+        assert.equal(mock.state.requests.length, beforeWrong, 'неверный confirm не шлёт запрос');
+
+        const before = mock.state.requests.length;
+        await confirmServer.rpc.tool('wb_call', { id: 'postV1Drafts', confirm: confirmId });
+        assert.equal(mock.state.requests.length, before + 1, 'запрос выполнен после подтверждения');
+        assert.equal(mock.state.requests.at(-1).path, '/api/supplies/v1/drafts');
+      } finally {
+        await confirmServer.stop();
+      }
+    });
+
+    await test('wb_request: POST без confirm блокируется, с confirm — выполняется', async () => {
+      const confirmServer = await startServer({ ...env, WB_CONFIRM_WRITES: '1' });
+      try {
+        const before = mock.state.requests.length;
+        const blocked = await confirmServer.rpc.tool('wb_request', {
+          method: 'POST',
+          url: `${mock.baseUrl}/api/v1/acceptance/options`,
+          body: { x: 1 },
+        });
+        assert.equal(blocked.structuredContent.approvalRequired, true);
+        assert.equal(mock.state.requests.length, before, 'сырой POST не ушёл без confirm');
+
+        const { text, isError } = await confirmServer.rpc.tool('wb_request', {
+          method: 'POST',
+          url: `${mock.baseUrl}/api/v1/acceptance/options`,
+          body: { x: 1 },
+          confirm: blocked.structuredContent.confirmId,
+        });
+        assert.ok(!isError, text);
+        assert.ok(text.includes('"received"'));
+      } finally {
+        await confirmServer.stop();
+      }
+    });
+
+    await test('wb_request: POST блокируется режимом WB_READONLY=1', async () => {
+      const ro = await startServer({ ...env, WB_READONLY: '1' });
+      try {
+        const before = mock.state.requests.length;
+        const { text, isError } = await ro.rpc.tool('wb_request', {
+          method: 'POST',
+          url: `${mock.baseUrl}/api/v1/acceptance/options`,
+          body: { x: 1 },
+        });
+        assert.equal(isError, true);
+        assert.ok(text.includes('WB_READONLY'), text);
+        assert.equal(mock.state.requests.length, before);
+      } finally {
+        await ro.stop();
+      }
+    });
+
+    await test('wb_request: POST блокируется read-only токеном', async () => {
+      const ro = await startServer({ ...env, WB_ACCOUNTS: JSON.stringify({ ro: RO_TOKEN }) });
+      try {
+        const before = mock.state.requests.length;
+        const { text, isError } = await ro.rpc.tool('wb_request', {
+          method: 'POST',
+          url: `${mock.baseUrl}/api/v1/acceptance/options`,
+          body: { x: 1 },
+        });
+        assert.equal(isError, true);
+        assert.ok(text.includes('Только чтение'), text);
+        assert.equal(mock.state.requests.length, before);
+      } finally {
+        await ro.stop();
+      }
+    });
+
+    await test('http:// к хосту wildberries.ru отклоняется (нужен https)', async () => {
+      const before = mock.state.requests.length;
+      const { text, isError } = await rpc.tool('wb_request', { method: 'GET', url: 'http://common-api.wildberries.ru/ping' });
+      assert.equal(isError, true);
+      assert.ok(text.includes('https'), text);
+      assert.equal(mock.state.requests.length, before, 'запрос не выполнен');
+    });
+
+    await test('wb_call: multipart-загрузка файла выполняется', async () => {
+      const upDir = path.join(tmp, 'catalog-upload');
+      await mkdir(upDir, { recursive: true });
+      const uploadFile = path.join(tmp, 'sample.txt');
+      await writeFile(uploadFile, 'hello wb upload');
+      const uploadOp = {
+        id: 'postV1Upload',
+        moduleKey: 'upload',
+        module: 'upload',
+        method: 'POST',
+        path: '/api/v1/upload',
+        host: mock.baseUrl,
+        summary: 'загрузка файла',
+        description: '',
+        tags: [],
+        category: 'other',
+        readonly: false,
+        destructive: false,
+        file: false,
+        params: [],
+        body: {
+          required: true,
+          contentType: 'multipart/form-data',
+          schema: { type: 'object', properties: { file: { type: 'string', format: 'binary' }, name: { type: 'string' } } },
+        },
+      };
+      await writeFile(
+        path.join(upDir, 'index.json'),
+        JSON.stringify({ meta: { modules: ['upload'], totalOps: 1 }, operations: [{ id: uploadOp.id, moduleKey: 'upload' }] }),
+      );
+      await writeFile(path.join(upDir, 'upload.json'), JSON.stringify({ moduleKey: 'upload', title: 'upload', operations: [uploadOp] }));
+
+      const up = await startServer({ ...env, WB_MCP_CATALOG: upDir });
+      try {
+        const { text, isError } = await up.rpc.tool('wb_call', { id: 'postV1Upload', body: { file: uploadFile, name: 'note' } });
+        assert.ok(!isError, text);
+        assert.ok(text.includes('HTTP 200'), text);
+        const last = mock.state.requests.at(-1);
+        assert.equal(last.path, '/api/v1/upload');
+        assert.match(last.contentType ?? '', /multipart\/form-data; boundary=/);
+        assert.ok(last.body.includes('hello wb upload'), 'содержимое файла в теле');
+        assert.ok(last.body.includes('sample.txt'), 'имя файла в теле');
+        assert.ok(last.body.includes('note'), 'текстовое поле в теле');
+      } finally {
+        await up.stop();
+      }
     });
   } finally {
     if (server) await server.stop();

@@ -21,6 +21,7 @@ export function startMock() {
         path: url.pathname,
         query: Object.fromEntries(url.searchParams),
         auth: req.headers.authorization,
+        contentType: req.headers['content-type'],
         body,
       });
 
@@ -78,6 +79,9 @@ export function startMock() {
       }
       if (url.pathname === '/api/v1/echo') {
         return json(200, { method: req.method, path: url.pathname, query: Object.fromEntries(url.searchParams), body });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/v1/upload') {
+        return json(200, { contentType: req.headers['content-type'] ?? '', body });
       }
       return json(404, { title: 'not found', detail: `no mock route for ${req.method} ${url.pathname}` });
     });

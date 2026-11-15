@@ -104,10 +104,18 @@ Or ask the assistant: "update the Wildberries catalog".
 ## Security
 
 - The token is stored in an encrypted file; client settings contain only the path to it.
-- Requests go only to Wildberries hosts; any other address is blocked.
-- Reads and writes are separated: the assistant cannot change anything silently.
-- With a read-only token, changes are impossible by design.
+- Requests go only to Wildberries hosts and **only over HTTPS** — `http://` is blocked.
+- Mutating requests require confirmation: the server refuses the write until the assistant echoes
+  the confirmation id that states what is about to change.
+- Read-only mode (`WB_READONLY=1`) blocks writes through both the catalog call and the raw
+  `wb_request`.
+- Reads and writes are separated, and a read-only token cannot change anything by design.
 - Logs contain no request bodies or response data.
+
+**Honest note on token storage:** encryption protects against accidental config leaks, but the key
+sits next to the encrypted file, so it does not stop malware running as your OS user. Do not pass the
+token as a `--token` argument (it lands in shell history) — use the `WB_API_TOKEN` environment
+variable or the interactive installer instead.
 
 ## License
 
