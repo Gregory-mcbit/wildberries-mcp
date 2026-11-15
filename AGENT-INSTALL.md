@@ -47,7 +47,7 @@ node install.mjs --client all --token "<WB_API_TOKEN>"
 После публикации в npm то же самое короче (без клонирования):
 
 ```bash
-npx -y -p wb-mcp wb-mcp-install --client all --token "<WB_API_TOKEN>"
+npx -y -p wildberries-seller-mcp wb-mcp-install --client all --token "<WB_API_TOKEN>"
 ```
 
 Полезные варианты:

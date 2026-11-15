@@ -71,7 +71,7 @@ async function main() {
     await test('репозиторий: package.json и server.json согласованы', async () => {
       const { problems, pkg, server } = await validateRelease(ROOT);
       assert.deepEqual(problems, []);
-      assert.equal(pkg.name, 'wb-mcp');
+      assert.equal(pkg.name, 'wildberries-seller-mcp');
       assert.equal(server.name, 'io.github.gregory-mcbit/wb-mcp');
       assert.equal(pkg.mcpName, server.name);
       assert.ok(server.description.length <= 100);

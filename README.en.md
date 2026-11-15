@@ -6,7 +6,7 @@ and the token plus store data never leave your machine.
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-85%20passing-brightgreen)](./test)
-[![npm](https://img.shields.io/npm/v/wb-mcp)](https://www.npmjs.com/package/wb-mcp)
+[![npm](https://img.shields.io/npm/v/wildberries-seller-mcp)](https://www.npmjs.com/package/wildberries-seller-mcp)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 ## Highlights
@@ -45,7 +45,7 @@ Start with **read-only** and only the scopes you need.
 | **Codex CLI** | `codex mcp add wb --env WB_API_TOKEN=<token> -- node <path>/server.mjs` |
 | **Gemini CLI** | `gemini mcp add wb --env WB_API_TOKEN=<token> -- node <path>/server.mjs` |
 | **All clients at once** | `node install.mjs --client all --token <token>` |
-| **From npm** | `npx -y -p wb-mcp wb-mcp-install --client all --token <token>` |
+| **From npm** | `npx -y -p wildberries-seller-mcp wb-mcp-install --client all --token <token>` |
 | **Portable ZIP** | `wb-mcp-portable.zip` from Releases → `install.cmd` / `install.sh` |
 
 The installer downloads the offline catalog, stores the token **encrypted**

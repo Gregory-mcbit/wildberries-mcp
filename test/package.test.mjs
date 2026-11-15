@@ -38,7 +38,8 @@ async function main() {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
 
   await test('package.json: имя, версия, лицензия, engines', async () => {
-    assert.equal(pkg.name, 'wb-mcp');
+    assert.equal(pkg.name, 'wildberries-seller-mcp');
+    assert.equal(pkg.mcpName, 'io.github.gregory-mcbit/wb-mcp', 'mcpName нужен для MCP Registry');
     assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
     assert.equal(pkg.license, 'MIT');
     assert.equal(pkg.type, 'module');

@@ -6,7 +6,7 @@
 [![Node.js](https://img.shields.io/badge/node-%E2%89%A520-brightgreen)](https://nodejs.org/)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](./package.json)
 [![Tests](https://img.shields.io/badge/tests-85%20passing-brightgreen)](./test)
-[![npm](https://img.shields.io/npm/v/wb-mcp)](https://www.npmjs.com/package/wb-mcp)
+[![npm](https://img.shields.io/npm/v/wildberries-seller-mcp)](https://www.npmjs.com/package/wildberries-seller-mcp)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 ## Главное
@@ -44,7 +44,7 @@
 | **Codex CLI** | `codex mcp add wb --env WB_API_TOKEN=<токен> -- node <путь>/server.mjs` |
 | **Gemini CLI** | `gemini mcp add wb --env WB_API_TOKEN=<токен> -- node <путь>/server.mjs` |
 | **Все клиенты сразу** | `node install.mjs --client all --token <токен>` |
-| **Из npm** | `npx -y -p wb-mcp wb-mcp-install --client all --token <токен>` |
+| **Из npm** | `npx -y -p wildberries-seller-mcp wb-mcp-install --client all --token <токен>` |
 | **Portable ZIP** | `wb-mcp-portable.zip` из Releases → `install.cmd` / `install.sh` |
 
 Установщик сам скачает офлайн-каталог, сохранит токен **зашифрованным** (`~/.wb-mcp/token.enc`)
